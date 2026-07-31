@@ -1,17 +1,18 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v47.0 — 31/07/2026
+  v58.0 — 31/07/2026
 
   Changelog:
-  v47.0 — Full desk editing of the plan column: tick/untick tasks, click a
-          task's text to edit it in place (Enter saves, Esc cancels), add a
-          timestamped note to any task, add new tasks, delete tasks (with
-          confirm). Free-notes section gains an add box. All writes are
-          path-scoped to todaysPlan and richardsNotes — fronts and meta remain
-          chat-authored and are still refused by the database rules (v47.0
-          rules required). Live listener means edits from any device or from
-          Claude appear instantly. Saving indicator in masthead.
+  v58.0 — Claude's take panel: displays the latest claudesTake annotation
+          (written by the walk-judgement skill / scheduled reviews) between
+          the masthead and the plan, with a toggle to show the recent
+          history. Read-only by design — takes are chat-authored.
+          Note editing: click any task note or free note to edit in place
+          (Enter saves, Esc cancels); × deletes a note (with confirm).
+          Fixes the v47.0 oversight that notes were append-only on the page.
+  v47.0 — Full desk editing of the plan column (tick, edit, add, delete,
+          notes) + free-notes box. Path-scoped writes.
   v13.0 — Initial read-only build.
 -->
 <html lang="en-GB">
@@ -44,6 +45,19 @@
   .stale{margin-top:14px;padding:10px 14px;background:var(--amber-bg);color:var(--amber);
     font-size:0.9rem;font-weight:500;border-radius:6px}
 
+  /* Claude's take */
+  .take{margin-top:22px;background:var(--white);border-radius:8px;padding:14px 18px}
+  .take-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px}
+  .take-label{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--faint)}
+  .take-head .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--faint)}
+  .take-text{font-size:0.97rem}
+  .take-more{font:inherit;font-size:0.8rem;color:var(--faint);background:none;border:none;
+    cursor:pointer;padding:0;margin-top:8px}
+  .take-more:hover{color:var(--ink)}
+  .take-history{margin-top:10px;border-top:1px solid var(--hairline);padding-top:8px}
+  .take-history p{font-size:0.88rem;color:var(--faint);padding:4px 0}
+  .take-history .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;margin-right:8px}
+
   main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:56px;margin-top:34px}
   @media(max-width:820px){main{grid-template-columns:1fr;gap:44px}}
   h2{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;
@@ -59,11 +73,20 @@
   .task-body{flex:1;min-width:0}
   .task-text{font-size:1.05rem;cursor:text;border-radius:4px}
   .task-text:hover{background:var(--white)}
-  .task-body input.edit{font:inherit;font-size:1.05rem;width:100%;border:1px solid var(--hairline);
+  input.edit{font:inherit;width:100%;border:1px solid var(--hairline);
     border-radius:4px;padding:2px 6px;background:var(--white)}
+  input.edit.task-size{font-size:1.05rem}
+  input.edit.note-size{font-size:0.88rem;margin-top:2px}
   .task-notes{margin-top:6px}
-  .task-notes li{list-style:none;font-size:0.88rem;color:var(--faint);padding:2px 0}
-  .task-notes .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;margin-right:8px}
+  .task-notes li{list-style:none;font-size:0.88rem;color:var(--faint);padding:2px 0;
+    display:flex;align-items:baseline;gap:0}
+  .task-notes .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;margin-right:8px;flex:none}
+  .note-text{cursor:text;border-radius:3px;flex:1;min-width:0}
+  .note-text:hover{background:var(--white)}
+  .note-del{font:inherit;font-size:0.8rem;color:var(--faint);background:none;border:none;
+    cursor:pointer;padding:0 0 0 10px;flex:none;visibility:hidden}
+  .task-notes li:hover .note-del,.footer-notes p:hover .note-del{visibility:visible}
+  .note-del:hover{color:var(--danger)}
   .task-actions{margin-top:5px;display:flex;gap:14px}
   .task-actions button{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
     border:none;cursor:pointer;padding:0}
@@ -84,8 +107,8 @@
   .front .edge::before{content:"→ ";font-weight:400}
 
   .footer-notes{margin-top:48px;padding-top:20px;border-top:1px solid var(--hairline)}
-  .footer-notes p{font-size:0.95rem;color:var(--faint);padding:2px 0}
-  .footer-notes .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;margin-right:8px}
+  .footer-notes p{font-size:0.95rem;color:var(--faint);padding:2px 0;display:flex;align-items:baseline}
+  .footer-notes .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;margin-right:8px;flex:none}
   .add-note-free{display:flex;gap:10px;margin-top:10px}
   .add-note-free input{margin-top:0;flex:1}
 
@@ -119,6 +142,15 @@
     </div>
   </header>
   <div id="staleNotice" class="stale hidden"></div>
+  <div id="takePanel" class="take hidden">
+    <div class="take-head">
+      <span class="take-label">Claude's take</span>
+      <span class="ts" id="takeTs"></span>
+    </div>
+    <div class="take-text" id="takeText"></div>
+    <button class="take-more hidden" id="takeMoreBtn"></button>
+    <div class="take-history hidden" id="takeHistory"></div>
+  </div>
 
   <main>
     <section>
@@ -163,9 +195,12 @@
     $(id).classList.remove("hidden"); };
   const asArray = v => Array.isArray(v) ? v : Object.values(v || {});
 
-  let state = null;          // latest snapshot of /walkReference
-  let editingId = null;      // task id currently in text-edit mode
-  let notingId = null;       // task id with an open note input
+  let state = null;
+  let editingId = null;                 // task id in text-edit mode
+  let notingId = null;                  // task id with an open new-note input
+  let editingNote = null;               // {taskId, idx} note being edited
+  let editingFreeNote = null;           // index of free note being edited
+  let showTakeHistory = false;
 
   $("signin").addEventListener("click", () =>
     firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
@@ -199,7 +234,7 @@
     savingTimer = setTimeout(() => $("saving").classList.remove("on"), 900);
   }
 
-  /* ---------- task actions ---------- */
+  /* ---------- task + note actions ---------- */
   function currentTasks(){ return asArray(state?.todaysPlan?.tasks).map(t =>
     ({ ...t, notes: asArray(t.notes) })); }
 
@@ -227,6 +262,22 @@
     t.notes.push({ ts: new Date().toISOString(), text: clean });
     saveTasks(tasks);
   }
+  function saveNoteEdit(taskId, idx, text){
+    editingNote = null;
+    const clean = text.trim();
+    const tasks = currentTasks();
+    const t = tasks.find(x => x.id === taskId); if (!t || !t.notes[idx]) { render(); return; }
+    if (!clean || clean === t.notes[idx].text) { render(); return; }
+    t.notes[idx].text = clean;          // timestamp preserved — edit, not a new note
+    saveTasks(tasks);
+  }
+  function deleteNote(taskId, idx){
+    const tasks = currentTasks();
+    const t = tasks.find(x => x.id === taskId); if (!t || !t.notes[idx]) return;
+    if (!confirm("Delete this note?")) return;
+    t.notes.splice(idx, 1);
+    saveTasks(tasks);
+  }
   function deleteTask(id){
     const tasks = currentTasks();
     const t = tasks.find(x => x.id === id); if (!t) return;
@@ -243,15 +294,35 @@
   });
   $("newTask").addEventListener("keydown", e => { if (e.key === "Enter") $("addTaskBtn").click(); });
 
+  function currentFreeNotes(){ return asArray(state?.richardsNotes)
+    .map(n => typeof n === "string" ? { ts: "", text: n } : { ...n }); }
+
   $("addFreeNoteBtn").addEventListener("click", () => {
     const clean = $("newFreeNote").value.trim();
     if (!clean) return;
-    const notes = asArray(state?.richardsNotes);
+    const notes = currentFreeNotes();
     notes.push({ ts: new Date().toISOString(), text: clean });
     $("newFreeNote").value = "";
     saveFreeNotes(notes);
   });
   $("newFreeNote").addEventListener("keydown", e => { if (e.key === "Enter") $("addFreeNoteBtn").click(); });
+
+  function saveFreeNoteEdit(idx, text){
+    editingFreeNote = null;
+    const clean = text.trim();
+    const notes = currentFreeNotes();
+    if (!notes[idx]) { render(); return; }
+    if (!clean || clean === notes[idx].text) { render(); return; }
+    notes[idx].text = clean;
+    saveFreeNotes(notes);
+  }
+  function deleteFreeNote(idx){
+    const notes = currentFreeNotes();
+    if (!notes[idx]) return;
+    if (!confirm("Delete this note?")) return;
+    notes.splice(idx, 1);
+    saveFreeNotes(notes);
+  }
 
   /* ---------- render ---------- */
   function render(){
@@ -268,15 +339,46 @@
         updated.toLocaleDateString("en-GB",{ weekday:"long", day:"numeric", month:"long" }) + ".";
     }
 
+    // Claude's take (read-only; written by the walk-judgement skill)
+    const takes = asArray(state.claudesTake)
+      .filter(t => t && t.take)
+      .sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
+    if (takes.length) {
+      const latest = takes[0];
+      $("takeTs").textContent = fmtDateTs(latest.ts);
+      $("takeText").textContent = latest.take;
+      const rest = takes.slice(1);
+      $("takeMoreBtn").classList.toggle("hidden", !rest.length);
+      if (rest.length) {
+        $("takeMoreBtn").textContent = showTakeHistory
+          ? "hide previous" : "previous takes (" + rest.length + ")";
+        $("takeHistory").classList.toggle("hidden", !showTakeHistory);
+        $("takeHistory").innerHTML = rest.map(t =>
+          '<p><span class="ts">' + esc(fmtDateTs(t.ts)) + '</span>' + esc(t.take) + '</p>').join("");
+      } else {
+        $("takeHistory").classList.add("hidden");
+      }
+      $("takePanel").classList.remove("hidden");
+    } else {
+      $("takePanel").classList.add("hidden");
+    }
+    $("takeMoreBtn").onclick = () => { showTakeHistory = !showTakeHistory; render(); };
+
     $("planDate").textContent = state.todaysPlan?.date ? "· " + esc(state.todaysPlan.date) : "";
 
     $("tasks").innerHTML = currentTasks().map(t => {
       const noteHtml = t.notes.length
-        ? '<ul class="task-notes">' + t.notes.map(n =>
-            '<li><span class="ts">' + esc(fmtTs(n.ts)) + '</span>' + esc(n.text) + '</li>').join("") + '</ul>'
+        ? '<ul class="task-notes">' + t.notes.map((n, i) => {
+            const isEditing = editingNote && editingNote.taskId === t.id && editingNote.idx === i;
+            const body = isEditing
+              ? '<input class="edit note-size" data-noteedit="' + esc(t.id) + ':' + i + '" value="' + esc(n.text) + '">'
+              : '<span class="note-text" data-notetext="' + esc(t.id) + ':' + i + '" title="Click to edit">' + esc(n.text) + '</span>' +
+                '<button class="note-del" data-notedel="' + esc(t.id) + ':' + i + '" aria-label="Delete note">×</button>';
+            return '<li><span class="ts">' + esc(fmtTs(n.ts)) + '</span>' + body + '</li>';
+          }).join("") + '</ul>'
         : "";
       const textHtml = editingId === t.id
-        ? '<input class="edit" data-edit="' + esc(t.id) + '" value="' + esc(t.text) + '">'
+        ? '<input class="edit task-size" data-edit="' + esc(t.id) + '" value="' + esc(t.text) + '">'
         : '<div class="task-text" data-text="' + esc(t.id) + '" title="Click to edit">' + esc(t.text) + '</div>';
       const noteInput = notingId === t.id
         ? '<input class="note-input" data-noteinput="' + esc(t.id) + '" placeholder="Note… (Enter to save)">'
@@ -295,19 +397,32 @@
       '<div class="status">' + esc(f.status) + '</div>' +
       (f.liveEdge ? '<div class="edge">' + esc(f.liveEdge) + '</div>' : "") + '</div>').join("");
 
-    $("richardsNotes").innerHTML = asArray(state.richardsNotes).map(n =>
-      '<p><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' +
-      esc(typeof n === "string" ? n : n.text) + '</p>').join("");
+    $("richardsNotes").innerHTML = currentFreeNotes().map((n, i) => {
+      const isEditing = editingFreeNote === i;
+      const body = isEditing
+        ? '<input class="edit note-size" data-freenoteedit="' + i + '" value="' + esc(n.text) + '">'
+        : '<span class="note-text" data-freenotetext="' + i + '" title="Click to edit">' + esc(n.text) + '</span>' +
+          '<button class="note-del" data-freenotedel="' + i + '" aria-label="Delete note">×</button>';
+      return '<p><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' + body + '</p>';
+    }).join("");
 
-    // wire up per-render handlers, then restore focus to any open input
-    document.querySelectorAll("[data-tick]").forEach(b =>
-      b.onclick = () => toggleDone(b.dataset.tick));
+    /* wire per-render handlers */
+    document.querySelectorAll("[data-tick]").forEach(b => b.onclick = () => toggleDone(b.dataset.tick));
     document.querySelectorAll("[data-text]").forEach(el =>
-      el.onclick = () => { editingId = el.dataset.text; notingId = null; render(); });
-    document.querySelectorAll("[data-del]").forEach(b =>
-      b.onclick = () => deleteTask(b.dataset.del));
+      el.onclick = () => { editingId = el.dataset.text; notingId = null; editingNote = null; render(); });
+    document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteTask(b.dataset.del));
     document.querySelectorAll("[data-note]").forEach(b =>
-      b.onclick = () => { notingId = b.dataset.note; editingId = null; render(); });
+      b.onclick = () => { notingId = b.dataset.note; editingId = null; editingNote = null; render(); });
+    document.querySelectorAll("[data-notetext]").forEach(el =>
+      el.onclick = () => { const [tid, i] = el.dataset.notetext.split(":");
+        editingNote = { taskId: tid, idx: +i }; editingId = null; notingId = null; render(); });
+    document.querySelectorAll("[data-notedel]").forEach(b =>
+      b.onclick = () => { const [tid, i] = b.dataset.notedel.split(":"); deleteNote(tid, +i); });
+    document.querySelectorAll("[data-freenotetext]").forEach(el =>
+      el.onclick = () => { editingFreeNote = +el.dataset.freenotetext; render(); });
+    document.querySelectorAll("[data-freenotedel]").forEach(b =>
+      b.onclick = () => deleteFreeNote(+b.dataset.freenotedel));
+
     document.querySelectorAll("[data-edit]").forEach(inp => {
       inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
       inp.onkeydown = e => {
@@ -323,6 +438,24 @@
         if (e.key === "Escape") { notingId = null; render(); }
       };
       inp.onblur = () => addNote(inp.dataset.noteinput, inp.value);
+    });
+    document.querySelectorAll("[data-noteedit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      const [tid, i] = inp.dataset.noteedit.split(":");
+      inp.onkeydown = e => {
+        if (e.key === "Enter") saveNoteEdit(tid, +i, inp.value);
+        if (e.key === "Escape") { editingNote = null; render(); }
+      };
+      inp.onblur = () => saveNoteEdit(tid, +i, inp.value);
+    });
+    document.querySelectorAll("[data-freenoteedit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      const i = +inp.dataset.freenoteedit;
+      inp.onkeydown = e => {
+        if (e.key === "Enter") saveFreeNoteEdit(i, inp.value);
+        if (e.key === "Escape") { editingFreeNote = null; render(); }
+      };
+      inp.onblur = () => saveFreeNoteEdit(i, inp.value);
     });
 
     show("app");
