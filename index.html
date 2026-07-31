@@ -4,6 +4,10 @@
   v58.0 — 31/07/2026
 
   Changelog:
+  v60.0 — Per-task margin annotations: renders each task's claudeNote (written
+          by the walk-judgement skill's "rate my priorities" pass) as an amber
+          Claude-labelled line beneath the task, read-only, with time stamp.
+          Preserved automatically through desk edits.
   v58.0 — Claude's take panel: displays the latest claudesTake annotation
           (written by the walk-judgement skill / scheduled reviews) between
           the masthead and the plan, with a toggle to show the recent
@@ -87,6 +91,11 @@
     cursor:pointer;padding:0 0 0 10px;flex:none;visibility:hidden}
   .task-notes li:hover .note-del,.footer-notes p:hover .note-del{visibility:visible}
   .note-del:hover{color:var(--danger)}
+  .cnote{margin-top:5px;font-size:0.88rem;color:var(--amber);display:flex;align-items:baseline}
+  .cnote .cl{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;
+    margin-right:8px;flex:none}
+  .cnote .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;margin-left:8px;
+    color:var(--faint);flex:none}
   .task-actions{margin-top:5px;display:flex;gap:14px}
   .task-actions button{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
     border:none;cursor:pointer;padding:0}
@@ -383,9 +392,13 @@
       const noteInput = notingId === t.id
         ? '<input class="note-input" data-noteinput="' + esc(t.id) + '" placeholder="Note… (Enter to save)">'
         : "";
+      const cnoteHtml = t.claudeNote && t.claudeNote.text
+        ? '<div class="cnote"><span class="cl">Claude</span><span>' + esc(t.claudeNote.text) +
+          '</span><span class="ts">' + esc(fmtTs(t.claudeNote.ts)) + '</span></div>'
+        : "";
       return '<div class="task' + (t.done ? " done" : "") + '">' +
         '<button class="tick" data-tick="' + esc(t.id) + '" aria-label="Toggle done">' + (t.done ? "✓" : "") + '</button>' +
-        '<div class="task-body">' + textHtml + noteHtml + noteInput +
+        '<div class="task-body">' + textHtml + noteHtml + cnoteHtml + noteInput +
         '<div class="task-actions">' +
           '<button data-note="' + esc(t.id) + '">+ note</button>' +
           '<button class="del" data-del="' + esc(t.id) + '">delete</button>' +
