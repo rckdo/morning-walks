@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<!--
+  MORNING WALK — DESK COMPANION
+  v13.0 — 31/07/2026
+
+  Changelog:
+  v13.0 — Initial build. Read-only view of /walkReference:
+          masthead with compile stamp + stale-data warning,
+          today's plan column with tick states and timestamped notes,
+          fronts rail showing status + live edge per front.
+          Google sign-in gate (read access restricted by DB rules
+          to rckdorman@gmail.com). No write capability yet — that
+          arrives in the write-back step.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Morning Walk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F3F5F7;      /* pale morning grey-blue */
+    --ink:#21252B;        /* near-black */
+    --faint:#5C6470;      /* secondary text */
+    --hairline:#D6DBE0;
+    --amber:#A8620D;      /* live edge + stale warning */
+    --amber-bg:#F6E8D4;
+    --moss:#3F6B3F;       /* done state */
+    --white:#FFFFFF;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:16px}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:'IBM Plex Sans',sans-serif;
+    line-height:1.55;
+    min-height:100vh;
+  }
+  .wrap{max-width:1060px;margin:0 auto;padding:0 24px 64px}
+
+  /* ---------- masthead ---------- */
+  header{
+    display:flex;align-items:baseline;justify-content:space-between;
+    gap:16px;flex-wrap:wrap;
+    padding:28px 0 18px;
+    border-bottom:1px solid var(--ink);
+  }
+  header h1{
+    font-family:'Fraunces',serif;font-weight:600;
+    font-size:1.7rem;letter-spacing:-0.01em;
+  }
+  header h1 span{color:var(--faint);font-weight:500}
+  .stamp{
+    font-family:'IBM Plex Mono',monospace;font-size:0.8rem;
+    color:var(--faint);
+  }
+  .stale{
+    margin-top:14px;padding:10px 14px;
+    background:var(--amber-bg);color:var(--amber);
+    font-size:0.9rem;font-weight:500;border-radius:6px;
+  }
+
+  /* ---------- layout ---------- */
+  main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:56px;margin-top:34px}
+  @media(max-width:820px){main{grid-template-columns:1fr;gap:44px}}
+
+  h2{
+    font-size:0.78rem;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.08em;color:var(--faint);margin-bottom:18px;
+  }
+  h2 b{color:var(--ink);font-weight:600}
+
+  /* ---------- plan column ---------- */
+  .task{display:flex;gap:14px;padding:13px 0;border-bottom:1px solid var(--hairline)}
+  .task:last-child{border-bottom:none}
+  .tick{
+    flex:none;width:22px;height:22px;margin-top:2px;
+    border:2px solid var(--faint);border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:0.8rem;color:var(--white);
+  }
+  .task.done .tick{background:var(--moss);border-color:var(--moss)}
+  .task.done .task-text{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
+  .task-text{font-size:1.05rem}
+  .task-notes{margin-top:6px}
+  .task-notes li{
+    list-style:none;font-size:0.88rem;color:var(--faint);
+    padding:2px 0;
+  }
+  .task-notes .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;margin-right:8px}
+  .empty-notes{display:none}
+
+  /* ---------- fronts rail ---------- */
+  .front{padding:18px 0;border-bottom:1px solid var(--hairline)}
+  .front:first-of-type{padding-top:2px}
+  .front:last-child{border-bottom:none}
+  .front h3{
+    font-family:'Fraunces',serif;font-weight:600;
+    font-size:1.15rem;margin-bottom:4px;
+  }
+  .front .status{font-size:0.92rem;color:var(--ink)}
+  .front .edge{
+    font-size:0.92rem;color:var(--amber);margin-top:6px;font-weight:500;
+  }
+  .front .edge::before{content:"→ ";font-weight:400}
+
+  /* ---------- notes footer ---------- */
+  .footer-notes{margin-top:48px;padding-top:20px;border-top:1px solid var(--hairline)}
+  .footer-notes p{font-size:0.95rem;color:var(--faint)}
+
+  /* ---------- states ---------- */
+  .gate,.msg{
+    max-width:360px;margin:20vh auto 0;text-align:center;
+  }
+  .gate h1{font-family:'Fraunces',serif;font-weight:600;font-size:1.6rem;margin-bottom:8px}
+  .gate p{color:var(--faint);font-size:0.95rem;margin-bottom:24px}
+  .gate button{
+    font:inherit;font-weight:500;cursor:pointer;
+    background:var(--ink);color:var(--white);
+    border:none;border-radius:8px;padding:12px 22px;
+  }
+  .gate button:focus-visible,.tick:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+  .msg{color:var(--faint)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+
+<div id="gate" class="gate hidden">
+  <h1>Morning Walk</h1>
+  <p>Sign in to load today's reference.</p>
+  <button id="signin">Sign in with Google</button>
+</div>
+
+<div id="loading" class="msg">Loading…</div>
+<div id="error" class="msg hidden"></div>
+
+<div id="app" class="wrap hidden">
+  <header>
+    <h1>Morning Walk <span>· Rolling Reference</span></h1>
+    <div class="stamp" id="stamp"></div>
+  </header>
+  <div id="staleNotice" class="stale hidden"></div>
+
+  <main>
+    <section>
+      <h2>Today's plan <b id="planDate"></b></h2>
+      <div id="tasks"></div>
+    </section>
+    <aside>
+      <h2>Active fronts</h2>
+      <div id="fronts"></div>
+    </aside>
+  </main>
+
+  <div class="footer-notes hidden" id="notesBlock">
+    <h2>Notes</h2>
+    <div id="richardsNotes"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey: "AIzaSyA3ga4wTbLELE3jvrl40j7OclsYCt8PtIo",
+    authDomain: "morning-walks-42eb6.firebaseapp.com",
+    databaseURL: "https://morning-walks-42eb6-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "morning-walks-42eb6"
+  });
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const show = id => {
+    ["gate","loading","error","app"].forEach(x => $(x).classList.add("hidden"));
+    $(id).classList.remove("hidden");
+  };
+
+  $("signin").addEventListener("click", () => {
+    firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
+      .catch(e => { $("error").textContent = "Sign-in failed: " + e.message; show("error"); });
+  });
+
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) { show("gate"); return; }
+    show("loading");
+    firebase.database().ref("walkReference").on("value",
+      snap => render(snap.val()),
+      err  => { $("error").textContent =
+        err.code === "PERMISSION_DENIED"
+          ? "This account doesn't have access to the reference."
+          : "Couldn't load data: " + err.message;
+        show("error");
+      });
+  });
+
+  function render(data){
+    if (!data) { $("error").textContent = "The reference node is empty."; show("error"); return; }
+
+    // masthead stamp + staleness
+    const updated = data.meta && data.meta.lastUpdated ? new Date(data.meta.lastUpdated) : null;
+    if (updated && !isNaN(updated)) {
+      $("stamp").textContent = "Compiled " + updated.toLocaleString("en-GB",
+        { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
+      const today = new Date(); today.setHours(0,0,0,0);
+      if (updated < today) {
+        $("staleNotice").textContent =
+          "This is not today's plan — last compiled " +
+          updated.toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" }) + ".";
+        $("staleNotice").classList.remove("hidden");
+      } else {
+        $("staleNotice").classList.add("hidden");
+      }
+    } else {
+      $("stamp").textContent = "";
+    }
+
+    // plan column
+    const plan = data.todaysPlan || {};
+    $("planDate").textContent = plan.date ? "· " + esc(plan.date) : "";
+    const tasks = Array.isArray(plan.tasks) ? plan.tasks : Object.values(plan.tasks || {});
+    $("tasks").innerHTML = tasks.map(t => {
+      const notes = Array.isArray(t.notes) ? t.notes : Object.values(t.notes || {});
+      const noteHtml = notes.length
+        ? '<ul class="task-notes">' + notes.map(n =>
+            '<li><span class="ts">' + esc(fmtTs(n.ts)) + '</span>' + esc(n.text) + '</li>').join("") + '</ul>'
+        : "";
+      return '<div class="task' + (t.done ? " done" : "") + '">' +
+        '<div class="tick">' + (t.done ? "✓" : "") + '</div>' +
+        '<div><div class="task-text">' + esc(t.text) + '</div>' + noteHtml + '</div></div>';
+    }).join("") || '<p class="msg">No tasks in today\'s plan.</p>';
+
+    // fronts rail — status + live edge only (detail is for the morning chat)
+    const fronts = Array.isArray(data.fronts) ? data.fronts : Object.values(data.fronts || {});
+    $("fronts").innerHTML = fronts.map(f =>
+      '<div class="front"><h3>' + esc(f.title) + '</h3>' +
+      '<div class="status">' + esc(f.status) + '</div>' +
+      (f.liveEdge ? '<div class="edge">' + esc(f.liveEdge) + '</div>' : "") +
+      '</div>').join("");
+
+    // free notes, only if any exist
+    const rn = Array.isArray(data.richardsNotes) ? data.richardsNotes : Object.values(data.richardsNotes || {});
+    if (rn.length) {
+      $("richardsNotes").innerHTML = rn.map(n => "<p>" + esc(typeof n === "string" ? n : n.text) + "</p>").join("");
+      $("notesBlock").classList.remove("hidden");
+    } else {
+      $("notesBlock").classList.add("hidden");
+    }
+
+    show("app");
+  }
+
+  function fmtTs(ts){
+    if (!ts) return "";
+    const d = new Date(ts);
+    return isNaN(d) ? String(ts)
+      : d.toLocaleTimeString("en-GB", { hour:"2-digit", minute:"2-digit" });
+  }
+</script>
+</body>
+</html>
