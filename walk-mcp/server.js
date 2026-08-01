@@ -3,6 +3,16 @@
   v65.0 — 01/08/2026
 
   Changelog:
+  v88.0 — Fabrication rule broadened from personal details to ALL context:
+          no invented events, agreements, dates, figures or history in
+          composer output; unknowns are written around or left as
+          [bracketed placeholders], never guessed.
+  v87.0 — Mark It goes live on v2: reviewer rewritten for the Director/
+          Author board (replace take, tick evidence-complete actions,
+          resolve answerable open notes with one-liners + diff entry; no
+          restructuring; change-detection so unchanged boards cost
+          nothing). Composer hardened: never invent personal details
+          (names, surnames, genders, honorifics) — write around unknowns.
   v82.0 — Assist engine: /assist endpoint with a function registry —
           first function compose_email (board-aware, style-encoded).
           Authenticated by Firebase ID token (must verify as Richard's
@@ -144,8 +154,7 @@ async function runReview() {
   if (!snap.exists()) return { status: 404, body: "walkReference is empty." };
   const ref = snap.val();
 
-  if (ref.projects) return { status: 501,
-    body: "Board is v2 — ambient reviewer awaits its v2 rewrite; skipped to protect the board." };
+  if (ref.projects) return runReviewV2(ref);
 
   const sig = richardSignature(ref);
   const prevState = (await db.ref(REVIEW_STATE).get()).val() || {};
@@ -242,6 +251,99 @@ async function runReview() {
     Object.keys(verdict.ideaReplies || {}).length + " idea replies)." };
 }
 
+/* ------------------------- v2 (Director/Author) ------------------------ */
+
+function v2Signature(ref) {
+  const notes = asArray(ref.notes).filter(n => n.state === "open")
+    .map(n => ({ id: n.id, text: n.text }));
+  const done = {};
+  asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => { done[a.id] = !!a.done; }));
+  return crypto.createHash("sha256")
+    .update(JSON.stringify({ notes, done, date: ref.plan?.date || "" })).digest("hex");
+}
+
+const REVIEW_V2_SYSTEM = `You are the mid-day reviewer of Richard's v2 Walk Reference (Director/Author board). This is judgement, not compile: actions and resolutions only — no restructuring, no new projects or actions, no summary rewrites. Richard is Digital & Broadcast Manager at The National League.
+
+Return ONLY a JSON object, no fences:
+{
+  "take": "2-4 sentence verdict on the day's shape right now",
+  "tickActionIds": ["a3"],
+  "noteResolutions": { "n7": "answered — one line" },
+  "diffWhat": "one line describing any changes made, or null"
+}
+
+Rules:
+- take: teeth, earned. Hard dates and unrecoverable items outrank everything. If nothing has changed, say so in one line — a clean bill is a valid verdict.
+- tickActionIds: ONLY actions the board itself evidences as complete. No fabricated completions — if the state doesn't show it, it didn't happen.
+- noteResolutions: ONLY for open notes you can genuinely answer or action from the board. One line each (answered / actioned / pushed back — with why). Leave notes you cannot resolve untouched — compile will take them.
+- Never edit Richard's words. Judge the work, never the people; do not extend assessments of named colleagues.
+- Weekend/evening: judge accordingly; do not manufacture office-hours urgency.`;
+
+async function runReviewV2(ref) {
+  const sig = v2Signature(ref);
+  const prevState = (await db.ref(REVIEW_STATE).get()).val() || {};
+  if (prevState.sig === sig) return { status: 200, body: "No change since last review — skipped." };
+
+  const ctx = { ...ref };
+  delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
+  delete ctx.ideas; delete ctx.claudesTake;
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200,
+      system: REVIEW_V2_SYSTEM,
+      messages: [{ role: "user", content:
+        "Current time: " + new Date().toISOString() + " (UK)\n\nBoard:\n" + JSON.stringify(ctx) }] })
+  });
+  if (!resp.ok) {
+    console.error("Anthropic API error:", resp.status, await resp.text());
+    return { status: 502, body: "Anthropic API error " + resp.status };
+  }
+  const data = await resp.json();
+  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
+  let v;
+  try { v = JSON.parse(text.replace(/```json|```/g, "").trim()); }
+  catch { return { status: 502, body: "Review output was not valid JSON — nothing written." }; }
+
+  const now = new Date().toISOString();
+  await db.ref(HISTORY + "/" + Date.now()).set(ref);
+
+  let changed = 0;
+  const diffs = asArray(ref.diffs);
+  const diffId = "d" + (diffs.length + 1);
+
+  asArray(v.tickActionIds).forEach(id => {
+    asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
+      if (a.id === id && !a.done) { a.done = true; changed++; }
+    }));
+  });
+  if (v.noteResolutions && typeof v.noteResolutions === "object") {
+    asArray(ref.notes).forEach(n => {
+      const r = v.noteResolutions[n.id];
+      if (r && n.state === "open") {
+        n.state = "resolved";
+        n.resolution = { ts: now, text: String(r), diffId };
+        changed++;
+      }
+    });
+  }
+  if (changed && v.diffWhat) {
+    diffs.push({ id: diffId, ts: now, changes: [{ what: String(v.diffWhat), why: "mid-day judgement (server review)" }] });
+    ref.diffs = diffs.slice(-5);
+  }
+  if (v.take) ref.take = [{ ts: now, text: String(v.take) }];
+
+  ref.meta = ref.meta || {};
+  ref.meta.lastReviewed = now;
+
+  await db.ref(NODE).set(ref);
+  await db.ref(REVIEW_STATE).set({ sig: v2Signature(ref), ts: now });
+
+  return { status: 200, body: "Marked at " + now + " (" + changed + " change(s)" +
+    (v.take ? ", take replaced" : "") + ")." };
+}
+
 /* ============================ Assist tools ============================ */
 
 const ASSIST_PATH = "/assist/" + REVIEW_SECRET;   // same capability segment; real auth is the Firebase ID token
@@ -253,6 +355,8 @@ const ASSIST_FUNCTIONS = {
     system: `You are the email composer inside Richard's Morning Walk desk app. Richard is Digital & Broadcast Manager at The National League (English football's fifth tier).
 
 You receive the live walk board (JSON) as context. Use it to resolve names, situations, dates and stakes the request refers to — but never leak board contents the email's recipient shouldn't see (internal candour, colleague assessments, Claude commentary). The board informs you; it is not quotable material.
+
+HARD RULE — fabricate nothing. Every factual element of the draft must come from the board or the request: no invented personal details (surnames, genders, pronouns, honorifics, roles), and equally no invented events, meetings, conversations, agreements, dates, deadlines, figures, prices, quotes or history. If a fact would strengthen the email but you do not have it, either write around it or leave an explicit [bracketed placeholder] for Richard to fill in. A plausible invention is a failed draft — an obvious gap is a successful one.
 
 House style: British English. Concise — short paragraphs, no padding, lead with the point. Warm but direct. No corporate filler ("I hope this finds you well", "please don't hesitate"). Sign off as Richard.
 
