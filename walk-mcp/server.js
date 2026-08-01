@@ -3,6 +3,8 @@
   v65.0 — 01/08/2026
 
   Changelog:
+  v74.0 — CORS on the review endpoint (allows the desk app's Mark It button
+          to trigger a review directly from rckdo.github.io).
   v72.0 — Task commentary is thread-based: review marks append to each
           task's thread[] (sticky conversations) with a new-or-reply bar,
           legacy notes/claudeNote folded in; signature includes Richard's
@@ -246,10 +248,16 @@ app.post(PATH, async (req, res) => {
 });
 app.get(PATH, (_req, res) => res.status(405).send("POST only"));
 
+const cors = res => {
+  res.set("Access-Control-Allow-Origin", "https://rckdo.github.io");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+};
 const reviewHandler = async (_req, res) => {
+  cors(res);
   try { const r = await runReview(); res.status(r.status).send(r.body); }
   catch (e) { console.error(e); res.status(500).send("review failed: " + e.message); }
 };
+app.options(REVIEW_PATH, (_req, res) => { cors(res); res.status(204).end(); });
 app.post(REVIEW_PATH, reviewHandler);
 app.get(REVIEW_PATH, reviewHandler);
 
