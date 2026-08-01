@@ -4,6 +4,12 @@
   v58.0 — 31/07/2026
 
   Changelog:
+  v71.0 — Literal margin: the plan column reserves a right-hand margin strip;
+          Claude's task marks render there as small sticky notes (yellow,
+          red-pen handwriting, slight alternating tilt, soft shadow), level
+          with their task. The headline take becomes a large sticky at the
+          top. On narrow screens the sticky drops beneath its task. Idea
+          threads keep inline red pen (conversation, not margin).
   v70.0 — Red pen: all Claude-voiced content (task margin marks, idea-thread
           replies, the headline take) restyled in a handwriting face (Caveat)
           in marking-red ink, sized up for legibility. Richard's content keeps
@@ -71,7 +77,8 @@
     font-size:0.9rem;font-weight:500;border-radius:6px}
 
   /* Claude's take */
-  .take{margin-top:22px;background:var(--white);border-radius:8px;padding:14px 18px}
+  .take{margin-top:22px;background:#FBF3B9;border-radius:2px;padding:14px 18px;
+    box-shadow:0 3px 8px rgba(33,37,43,0.16);transform:rotate(-0.4deg)}
   .take-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px}
   .take-label{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--faint)}
   .take-head .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--faint)}
@@ -90,7 +97,16 @@
     color:var(--faint);margin-bottom:18px}
   h2 b{color:var(--ink);font-weight:600}
 
-  .task{display:flex;gap:14px;padding:13px 0;border-bottom:1px solid var(--hairline)}
+  .task{display:grid;grid-template-columns:22px minmax(0,1fr) 168px;gap:14px;
+    padding:13px 0;border-bottom:1px solid var(--hairline)}
+  @media(max-width:820px){.task{grid-template-columns:22px minmax(0,1fr)}}
+  .sticky{font-family:'Caveat',cursive;font-weight:500;font-size:1.15rem;line-height:1.25;
+    color:var(--redpen);background:#FBF3B9;padding:9px 12px 7px;border-radius:2px;
+    box-shadow:0 2px 6px rgba(33,37,43,0.16);align-self:start;transform:rotate(-1.4deg)}
+  .task:nth-child(even) .sticky{transform:rotate(1deg)}
+  .sticky .ts{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.68rem;
+    color:var(--faint);margin-top:3px}
+  @media(max-width:820px){.task .sticky{grid-column:2;margin-top:6px;justify-self:start}}
   .tick{flex:none;width:22px;height:22px;margin-top:2px;border:2px solid var(--faint);
     border-radius:50%;display:flex;align-items:center;justify-content:center;
     font-size:0.8rem;color:var(--white);cursor:pointer;background:none;padding:0}
@@ -524,18 +540,18 @@
       const noteInput = notingId === t.id
         ? '<input class="note-input" data-noteinput="' + esc(t.id) + '" placeholder="Note… (Enter to save)">'
         : "";
-      const cnoteHtml = t.claudeNote && t.claudeNote.text
-        ? '<div class="cnote"><span class="cl">Claude</span><span>' + esc(t.claudeNote.text) +
-          '</span><span class="ts">' + esc(fmtTs(t.claudeNote.ts)) + '</span></div>'
+      const stickyHtml = t.claudeNote && t.claudeNote.text
+        ? '<div class="sticky">' + esc(t.claudeNote.text) +
+          '<span class="ts">' + esc(fmtTs(t.claudeNote.ts)) + '</span></div>'
         : "";
       return '<div class="task' + (t.done ? " done" : "") + '">' +
         '<button class="tick" data-tick="' + esc(t.id) + '" aria-label="Toggle done">' + (t.done ? "✓" : "") + '</button>' +
-        '<div class="task-body">' + textHtml + noteHtml + cnoteHtml + noteInput +
+        '<div class="task-body">' + textHtml + noteHtml + noteInput +
         '<div class="task-actions">' +
           '<button data-note="' + esc(t.id) + '">+ note</button>' +
           '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("task", t.text) + '">discuss</a>' +
           '<button class="del" data-del="' + esc(t.id) + '">delete</button>' +
-        '</div></div></div>';
+        '</div></div>' + stickyHtml + '</div>';
     }).join("") || '<p class="msg">No tasks yet — add one below.</p>';
 
     $("fronts").innerHTML = asArray(state.fronts).map(f =>
