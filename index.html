@@ -4,6 +4,12 @@
   v82.0 — 01/08/2026
 
   Changelog:
+  v90.0 — Live spend meter: subscribes to /apiUsage (written by server
+          v90 from each API response's own token counts) and shows an
+          estimated running spend + call count in the Tools header.
+          Estimate uses Sonnet pricing ($3/$15 per MTok); true balance
+          remains on console.anthropic.com (no public balance endpoint).
+          Requires rules v90 (apiUsage read).
   v82.0 — Tools area (v2 zone): first AI function inside the app — the
           Email composer. Give it context, Draft, and Claude writes the
           email in place, board-aware (the server passes the live board as
@@ -436,7 +442,7 @@
     </main>
 
     <div class="tools">
-      <h2>Tools</h2>
+      <h2>Tools <span class="toolstatus" id="spendTally" style="float:right;text-transform:none;letter-spacing:0"></span></h2>
       <div class="tool">
         <h3>Email composer</h3>
         <div class="hint">Who it's to and what it needs to achieve — the board fills in the rest.</div>
@@ -494,6 +500,8 @@
   firebase.auth().onAuthStateChanged(user => {
     if (!user) { show("gate"); return; }
     show("loading");
+    firebase.database().ref("apiUsage").on("value",
+      snap => renderSpend(snap.val()), () => {});
     firebase.database().ref("walkReference").on("value",
       snap => { state = snap.val(); render(); },
       err  => { $("error").textContent = err.code === "PERMISSION_DENIED"
@@ -1081,6 +1089,16 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3500);
   }
+  /* ---------- spend meter ---------- */
+  function renderSpend(u){
+    const el = $("spendTally");
+    if (!u || !u.calls) { el.textContent = ""; return; }
+    const usd = (u.inTok || 0) * 3 / 1e6 + (u.outTok || 0) * 15 / 1e6;
+    const since = u.since ? new Date(u.since) : null;
+    el.textContent = "\u2248 $" + usd.toFixed(2) + " used \u00b7 " + u.calls + " calls" +
+      (since && !isNaN(since) ? " since " + since.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" }) : "");
+  }
+
   /* ---------- Tools: /assist ---------- */
   const ASSIST_URL = "https://morning-walks-419435526393.europe-west1.run.app/assist/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
   async function runAssist(fn, input, statusEl, outEl, headEl, btn){
