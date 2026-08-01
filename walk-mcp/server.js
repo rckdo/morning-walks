@@ -3,6 +3,16 @@
   v65.0 — 01/08/2026
 
   Changelog:
+  v82.0 — Assist engine: /assist endpoint with a function registry —
+          first function compose_email (board-aware, style-encoded).
+          Authenticated by Firebase ID token (must verify as Richard's
+          account); CORS for the desk app. Board context sent minus the
+          v1 mirror. Requires ANTHROPIC_API_KEY.
+  v78.0 — v2 cutover: update_reference validates the v2 schema (requires
+          notes / projects / plan; legacy mirror keys accepted as unknown
+          keys during transition; archive behaviour unchanged). Ambient
+          /review guarded off once the board is v2 — its merge logic is
+          v1-shaped and will be rewritten separately.
   v74.0 — CORS on the review endpoint (allows the desk app's Mark It button
           to trigger a review directly from rckdo.github.io).
   v72.0 — Task commentary is thread-based: review marks append to each
@@ -66,14 +76,14 @@ function buildServer() {
 
   server.tool(
     "update_reference",
-    "Write the complete new state of the rolling reference (post-walk compile or mid-day edit). Pass the ENTIRE document as a JSON string — replaces the node wholesale; previous state is archived automatically and meta.lastUpdated/updatedBy are stamped by the server. Ideas live in ideas[] ({id, title, seed, state: thrashing|parked|graduated, opened, thread[]: {ts, who: richard|claude, text}}) — preserve threads append-only. Refused if 'fronts' or 'todaysPlan' are missing.",
+    "Write the complete new state of the rolling reference (post-walk compile or mid-day edit). Pass the ENTIRE document as a JSON string — replaces the node wholesale; previous state is archived automatically and meta.lastUpdated/updatedBy are stamped by the server. v2 schema: notes[], projects[] (each with actions: id/text/urgency/done/provenance), plan {date, actionIds}, take, diffs[] — legacy mirror keys (fronts, todaysPlan) accepted during transition. Refused if notes, projects or plan are missing.",
     { referenceJson: z.string().describe("Full reference document as a JSON string") },
     async ({ referenceJson }) => {
       let next;
       try { next = JSON.parse(referenceJson); }
       catch (e) { return { content: [{ type: "text", text: "ERROR: invalid JSON — " + e.message }] }; }
-      if (!next || typeof next !== "object" || !next.fronts || !next.todaysPlan)
-        return { content: [{ type: "text", text: "ERROR: refused — payload must contain 'fronts' and 'todaysPlan'. Node unchanged." }] };
+      if (!next || typeof next !== "object" || !next.notes || !next.projects || !next.plan)
+        return { content: [{ type: "text", text: "ERROR: refused — v2 payload must contain 'notes', 'projects' and 'plan'. Unknown/legacy keys (fronts, todaysPlan mirrors) are accepted. Node unchanged." }] };
 
       const current = await db.ref(NODE).get();
       if (current.exists()) await db.ref(HISTORY + "/" + Date.now()).set(current.val());
@@ -133,6 +143,9 @@ async function runReview() {
   const snap = await db.ref(NODE).get();
   if (!snap.exists()) return { status: 404, body: "walkReference is empty." };
   const ref = snap.val();
+
+  if (ref.projects) return { status: 501,
+    body: "Board is v2 — ambient reviewer awaits its v2 rewrite; skipped to protect the board." };
 
   const sig = richardSignature(ref);
   const prevState = (await db.ref(REVIEW_STATE).get()).val() || {};
@@ -229,6 +242,69 @@ async function runReview() {
     Object.keys(verdict.ideaReplies || {}).length + " idea replies)." };
 }
 
+/* ============================ Assist tools ============================ */
+
+const ASSIST_PATH = "/assist/" + REVIEW_SECRET;   // same capability segment; real auth is the Firebase ID token
+
+const ASSIST_FUNCTIONS = {
+  compose_email: {
+    boardContext: true,
+    maxTokens: 1500,
+    system: `You are the email composer inside Richard's Morning Walk desk app. Richard is Digital & Broadcast Manager at The National League (English football's fifth tier).
+
+You receive the live walk board (JSON) as context. Use it to resolve names, situations, dates and stakes the request refers to — but never leak board contents the email's recipient shouldn't see (internal candour, colleague assessments, Claude commentary). The board informs you; it is not quotable material.
+
+House style: British English. Concise — short paragraphs, no padding, lead with the point. Warm but direct. No corporate filler ("I hope this finds you well", "please don't hesitate"). Sign off as Richard.
+
+Output EXACTLY this format and nothing else:
+Subject: <subject line>
+
+<email body>`
+  }
+};
+
+async function verifyRichard(req) {
+  const h = req.headers.authorization || "";
+  if (!h.startsWith("Bearer ")) return null;
+  try {
+    const decoded = await admin.auth().verifyIdToken(h.slice(7));
+    return decoded.email === "rckdorman@gmail.com" ? decoded : null;
+  } catch { return null; }
+}
+
+async function runAssist(fnName, input) {
+  if (!ANTHROPIC_KEY) return { status: 500, body: "ANTHROPIC_API_KEY not set on the service." };
+  const fn = ASSIST_FUNCTIONS[fnName];
+  if (!fn) return { status: 404, body: "Unknown function: " + fnName };
+  if (!input || typeof input !== "string" || !input.trim())
+    return { status: 400, body: "Empty input." };
+
+  let userMsg = "Request:\n" + input.trim();
+  if (fn.boardContext) {
+    const snap = await db.ref(NODE).get();
+    if (snap.exists()) {
+      const board = snap.val();
+      delete board.todaysPlan; delete board.fronts;   // v1 mirror adds tokens, not context
+      delete board.richardsNotes; delete board.ideas; delete board.claudesTake;
+      userMsg = "Current walk board (context):\n" + JSON.stringify(board) + "\n\n" + userMsg;
+    }
+  }
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: fn.maxTokens || 1200,
+      system: fn.system, messages: [{ role: "user", content: userMsg }] })
+  });
+  if (!resp.ok) {
+    console.error("Anthropic API error:", resp.status, await resp.text());
+    return { status: 502, body: "Anthropic API error " + resp.status };
+  }
+  const data = await resp.json();
+  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+  return { status: 200, body: text || "(empty response)" };
+}
+
 /* ================================ HTTP ================================ */
 
 const app = express();
@@ -260,6 +336,21 @@ const reviewHandler = async (_req, res) => {
 app.options(REVIEW_PATH, (_req, res) => { cors(res); res.status(204).end(); });
 app.post(REVIEW_PATH, reviewHandler);
 app.get(REVIEW_PATH, reviewHandler);
+
+const assistCors = res => {
+  res.set("Access-Control-Allow-Origin", "https://rckdo.github.io");
+  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "content-type, authorization");
+};
+app.options(ASSIST_PATH, (_req, res) => { assistCors(res); res.status(204).end(); });
+app.post(ASSIST_PATH, async (req, res) => {
+  assistCors(res);
+  try {
+    if (!(await verifyRichard(req))) { res.status(401).send("Not authorised."); return; }
+    const r = await runAssist(req.body?.function, req.body?.input);
+    res.status(r.status).send(r.body);
+  } catch (e) { console.error(e); res.status(500).send("assist failed: " + e.message); }
+});
 
 app.get("/", (_req, res) => res.send("walk-reference MCP: ok"));
 
