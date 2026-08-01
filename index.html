@@ -4,6 +4,14 @@
   v72.0 — 01/08/2026
 
   Changelog:
+  v74.0 — Mark It button: big red fixed-position marker button (bottom right)
+          that triggers a review — calls the server's /review endpoint
+          directly (needs server v74 + ANTHROPIC_API_KEY deployed); if the
+          endpoint isn't live it falls back to opening a Claude chat with the
+          judgement prompt pre-filled. Reply affordances beefed up: fat green
+          + buttons in the margin next to each stack (and on ideas) replace
+          the inline grey "reply"/"+ thought" text links. Small toast for
+          button feedback.
   v73.0 — MOBILE FIX: the narrow-screen rule repositioned .stack instead of
           its wrapper .marginCell (the actual grid child), so sticky stacks
           collapsed into the 22px tick column on phones. Now the margin cell
@@ -200,6 +208,22 @@
   .discuss{font-size:0.8rem;color:var(--faint);text-decoration:none}
   .discuss:hover{color:var(--ink);text-decoration:underline}
 
+  /* Mark It button + plus buttons + toast */
+  .fab{position:fixed;bottom:22px;right:22px;z-index:50;width:64px;height:64px;
+    border-radius:50%;border:none;cursor:pointer;background:var(--redpen);color:#fff;
+    font-family:'Caveat',cursive;font-weight:600;font-size:1.05rem;line-height:1;
+    box-shadow:0 6px 16px rgba(190,52,44,0.45);transition:transform .12s}
+  .fab:hover{transform:scale(1.06)}
+  .fab:disabled{opacity:0.6;cursor:wait}
+  .plusbtn{width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;
+    background:var(--stickyG);color:var(--biro);font-size:1.3rem;font-weight:600;
+    line-height:1;box-shadow:0 2px 5px rgba(33,37,43,0.18);align-self:flex-start;flex:none}
+  .plusbtn:hover{background:var(--stickyGd)}
+  .toast{position:fixed;bottom:96px;right:22px;z-index:50;background:var(--ink);
+    color:#fff;font-size:0.85rem;padding:10px 14px;border-radius:8px;max-width:280px;
+    opacity:0;transition:opacity .25s;pointer-events:none}
+  .toast.on{opacity:1}
+
   .gate,.msg{max-width:360px;margin:20vh auto 0;text-align:center}
   .gate h1{font-family:'Fraunces',serif;font-weight:600;font-size:1.6rem;margin-bottom:8px}
   .gate p{color:var(--faint);font-size:0.95rem;margin-bottom:24px}
@@ -278,6 +302,9 @@
     </div>
   </div>
 </div>
+
+<button id="markBtn" class="fab hidden" title="Get Claude to mark the board">mark<br>it</button>
+<div id="toast" class="toast"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
@@ -572,7 +599,7 @@
       }
       const replyHtml = replyingId === t.id
         ? '<div class="reply-wrap"><input data-replyinput="' + esc(t.id) + '" placeholder="Reply… (Enter to stick)"></div>'
-        : "";
+        : '<button class="plusbtn" data-reply="' + esc(t.id) + '" aria-label="Reply with a green sticky">+</button>';
       const marginHtml = '<div class="marginCell">' + stackHtml + replyHtml + '</div>';
 
       const textHtml = editingId === t.id
@@ -583,7 +610,6 @@
         '<button class="tick" data-tick="' + esc(t.id) + '" aria-label="Toggle done">' + (t.done ? "✓" : "") + '</button>' +
         '<div class="task-body">' + textHtml +
         '<div class="task-actions">' +
-          '<button data-reply="' + esc(t.id) + '">reply</button>' +
           '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("task", t.text) + '">discuss</a>' +
           '<button class="del" data-del="' + esc(t.id) + '">delete</button>' +
         '</div></div>' + marginHtml + '</div>';
@@ -614,7 +640,7 @@
         '<button class="idea-state ' + esc(i.state || "thrashing") + '" data-state="' + esc(i.id) + '" title="Click to change state">' + esc(i.state || "thrashing") + '</button>' +
         '</div>' + threadHtml + thoughtInput +
         '<div class="idea-actions">' +
-          '<button data-thought="' + esc(i.id) + '">+ thought</button>' +
+          '<button class="plusbtn" data-thought="' + esc(i.id) + '" aria-label="Add a thought">+</button>' +
           '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("idea", i.title) + '">discuss</a>' +
           '<button class="del" data-ideadel="' + esc(i.id) + '">delete</button>' +
         '</div></div>';
@@ -632,6 +658,7 @@
 
     wire();
     show("app");
+    $("markBtn").classList.remove("hidden");
   }
 
   function wire(){
@@ -707,6 +734,34 @@
       kind + ", and update its annotation in the reference.";
     return "https://claude.ai/new?q=" + encodeURIComponent(prompt);
   }
+
+  /* ---------- Mark It ---------- */
+  const REVIEW_URL = "https://morning-walks-419435526393.europe-west1.run.app/review/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
+  let toastTimer;
+  function toast(msg, ms){
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3500);
+  }
+  $("markBtn").addEventListener("click", async () => {
+    const btn = $("markBtn");
+    btn.disabled = true;
+    toast("Asking Claude to mark the board…", 8000);
+    try {
+      const r = await fetch(REVIEW_URL, { method: "POST" });
+      const text = await r.text();
+      if (r.ok) toast(text || "Marked — watch the margin.");
+      else throw new Error(text || ("HTTP " + r.status));
+    } catch (e) {
+      toast("Reviewer not live — opening a Claude chat instead.");
+      window.open("https://claude.ai/new?q=" + encodeURIComponent(
+        "Run a walk judgement: read the walk reference, judge the day's shape, reply into any stacks and idea threads where the last word was mine, and write it all back."),
+        "_blank", "noopener");
+    }
+    btn.disabled = false;
+  });
+
   function fmtTs(ts){
     if (!ts) return "";
     const d = new Date(ts);
