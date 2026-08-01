@@ -3,6 +3,9 @@
   v65.0 — 01/08/2026
 
   Changelog:
+  v94.0 — reviewState carries a basis (tick map + per-open-note hashes +
+          plan date) alongside the signature, so the desk app can count
+          exactly how many changes are waiting since the last mark.
   v90.0 — Live spend tally: every API response's token usage accumulated
           into /apiUsage (calls, in/out tokens, since) for the desk app's
           meter. Composer ASK-FIRST rule: central context gaps produce
@@ -358,7 +361,15 @@ async function runReviewV2(ref) {
   ref.meta.lastReviewed = now;
 
   await db.ref(NODE).set(ref);
-  await db.ref(REVIEW_STATE).set({ sig: v2Signature(ref), ts: now });
+
+  const basisDone = {};
+  asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => { basisDone[a.id] = !!a.done; }));
+  const basisNotes = {};
+  asArray(ref.notes).filter(n => n.state === "open").forEach(n => {
+    basisNotes[n.id] = crypto.createHash("sha256").update(String(n.text || "")).digest("hex");
+  });
+  await db.ref(REVIEW_STATE).set({ sig: v2Signature(ref), ts: now,
+    basis: { done: basisDone, notes: basisNotes, date: ref.plan?.date || "" } });
 
   return { status: 200, body: "Marked at " + now + " (" + changed + " change(s)" +
     (v.take ? ", take replaced" : "") + ")." };
