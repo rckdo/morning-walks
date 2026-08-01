@@ -4,6 +4,18 @@
   v58.0 — 31/07/2026
 
   Changelog:
+  v68.0 — Ideas in play: first-class ideas section (title, state badge that
+          cycles thrashing→parked→graduated on click, seed, running thread of
+          You/Claude entries, add-a-thought per idea, new-idea box, delete).
+          Front-level Claude marks removed per 31/07 decision (discuss links
+          stay). Masthead shows Reviewed stamp (meta.lastReviewed) alongside
+          Compiled. Requires rules v68.0 (opens walkReference/ideas to
+          browser writes).
+  v62.0 — Fronts gain Claude annotations: renders claudeNote on each front in
+          the rail (written by walk-judgement v62). Discuss links: every front
+          and task gets a "discuss" link that opens a new Claude chat
+          pre-focused on that item (claude.ai/new?q=…), so any concept on the
+          board can become a conversation in one click.
   v60.0 — Per-task margin annotations: renders each task's claudeNote (written
           by the walk-judgement skill's "rate my priorities" pass) as an amber
           Claude-labelled line beneath the task, read-only, with time stamp.
@@ -96,6 +108,43 @@
     margin-right:8px;flex:none}
   .cnote .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;margin-left:8px;
     color:var(--faint);flex:none}
+  /* ideas */
+  .ideas{margin-top:48px;padding-top:20px;border-top:1px solid var(--hairline)}
+  .idea{background:var(--white);border-radius:8px;padding:16px 18px;margin-bottom:16px}
+  .idea-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .idea-head h3{font-family:'Fraunces',serif;font-weight:600;font-size:1.15rem;flex:1;min-width:0}
+  .idea-state{font:inherit;font-size:0.72rem;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.06em;border:1px solid var(--hairline);border-radius:99px;
+    padding:2px 10px;background:none;cursor:pointer;color:var(--faint)}
+  .idea-state.thrashing{color:var(--amber);border-color:var(--amber)}
+  .idea-state.graduated{color:var(--moss);border-color:var(--moss)}
+  .idea-seed{font-size:0.9rem;color:var(--faint);margin-top:4px}
+  .idea-thread{margin-top:12px;border-top:1px solid var(--hairline);padding-top:8px}
+  .idea-entry{display:flex;align-items:baseline;padding:4px 0;font-size:0.93rem;gap:0}
+  .idea-entry .who{font-size:0.7rem;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.06em;margin-right:10px;flex:none;width:52px;color:var(--faint)}
+  .idea-entry.claude{color:var(--amber)}
+  .idea-entry.claude .who{color:var(--amber)}
+  .idea-entry .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;
+    color:var(--faint);margin-left:10px;flex:none}
+  .idea-entry span.body{flex:1;min-width:0}
+  .idea-actions{margin-top:8px;display:flex;gap:14px}
+  .idea-actions button{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
+    border:none;cursor:pointer;padding:0}
+  .idea-actions button:hover{color:var(--ink)}
+  .idea-actions .del:hover{color:var(--danger)}
+  .add-idea{background:var(--white);border-radius:8px;padding:14px 18px;display:flex;
+    flex-direction:column;gap:8px}
+  .add-idea input{font:inherit;border:1px solid var(--hairline);border-radius:4px;
+    padding:6px 8px;background:var(--paper)}
+  .add-idea .row{display:flex;gap:10px}
+  .add-idea .row input{flex:1}
+  .add-idea button{font:inherit;font-weight:500;cursor:pointer;background:var(--ink);
+    color:var(--white);border:none;border-radius:6px;padding:6px 14px;align-self:flex-start}
+
+  .discuss{font-size:0.8rem;color:var(--faint);text-decoration:none}
+  .discuss:hover{color:var(--ink);text-decoration:underline}
+  .front .discuss{display:inline-block;margin-top:6px}
   .task-actions{margin-top:5px;display:flex;gap:14px}
   .task-actions button{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
     border:none;cursor:pointer;padding:0}
@@ -176,6 +225,20 @@
     </aside>
   </main>
 
+  <div class="ideas">
+    <h2>Ideas in play</h2>
+    <div id="ideasList"></div>
+    <div class="add-idea">
+      <div class="row">
+        <input id="newIdeaTitle" type="text" placeholder="New idea — title…" aria-label="New idea title">
+      </div>
+      <div class="row">
+        <input id="newIdeaSeed" type="text" placeholder="The thought itself… (Enter to add)" aria-label="New idea seed">
+      </div>
+      <button id="addIdeaBtn">Add idea</button>
+    </div>
+  </div>
+
   <div class="footer-notes">
     <h2>Notes</h2>
     <div id="richardsNotes"></div>
@@ -210,6 +273,39 @@
   let editingNote = null;               // {taskId, idx} note being edited
   let editingFreeNote = null;           // index of free note being edited
   let showTakeHistory = false;
+  let thoughtingId = null;              // idea id with an open add-thought input
+
+  const IDEA_STATES = ["thrashing", "parked", "graduated"];
+
+  function currentIdeas(){ return asArray(state?.ideas).map(i =>
+    ({ ...i, thread: asArray(i.thread) })); }
+
+  function saveIdeas(ideas){
+    flashSaving();
+    return firebase.database().ref("walkReference/ideas").set(ideas)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  function addThought(id, text){
+    thoughtingId = null;
+    const clean = text.trim();
+    if (!clean) { render(); return; }
+    const ideas = currentIdeas();
+    const idea = ideas.find(x => x.id === id); if (!idea) { render(); return; }
+    idea.thread.push({ ts: new Date().toISOString(), who: "richard", text: clean });
+    saveIdeas(ideas);
+  }
+  function cycleState(id){
+    const ideas = currentIdeas();
+    const idea = ideas.find(x => x.id === id); if (!idea) return;
+    idea.state = IDEA_STATES[(IDEA_STATES.indexOf(idea.state) + 1) % IDEA_STATES.length];
+    saveIdeas(ideas);
+  }
+  function deleteIdea(id){
+    const ideas = currentIdeas();
+    const idea = ideas.find(x => x.id === id); if (!idea) return;
+    if (!confirm('Delete idea "' + idea.title + '" and its whole thread?')) return;
+    saveIdeas(ideas.filter(x => x.id !== id));
+  }
 
   $("signin").addEventListener("click", () =>
     firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
@@ -316,6 +412,25 @@
   });
   $("newFreeNote").addEventListener("keydown", e => { if (e.key === "Enter") $("addFreeNoteBtn").click(); });
 
+  $("addIdeaBtn").addEventListener("click", () => {
+    const title = $("newIdeaTitle").value.trim();
+    const seed = $("newIdeaSeed").value.trim();
+    if (!title || !seed) return;
+    const ideas = currentIdeas();
+    const now = new Date();
+    ideas.push({
+      id: "idea-" + now.getTime(),
+      title: title,
+      seed: seed,
+      state: "thrashing",
+      opened: now.toLocaleDateString("en-GB"),
+      thread: [{ ts: now.toISOString(), who: "richard", text: seed }]
+    });
+    $("newIdeaTitle").value = ""; $("newIdeaSeed").value = "";
+    saveIdeas(ideas);
+  });
+  $("newIdeaSeed").addEventListener("keydown", e => { if (e.key === "Enter") $("addIdeaBtn").click(); });
+
   function saveFreeNoteEdit(idx, text){
     editingFreeNote = null;
     const clean = text.trim();
@@ -340,7 +455,11 @@
     const updated = state.meta?.lastUpdated ? new Date(state.meta.lastUpdated) : null;
     if (updated && !isNaN(updated)) {
       $("stamp").textContent = "Compiled " + updated.toLocaleString("en-GB",
-        { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" });
+        { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) +
+        (state.meta?.lastReviewed && !isNaN(new Date(state.meta.lastReviewed))
+          ? " · Reviewed " + new Date(state.meta.lastReviewed).toLocaleTimeString("en-GB",
+              { hour:"2-digit", minute:"2-digit" })
+          : "");
       const today = new Date(); today.setHours(0,0,0,0);
       $("staleNotice").classList.toggle("hidden", !(updated < today));
       if (updated < today) $("staleNotice").textContent =
@@ -401,6 +520,7 @@
         '<div class="task-body">' + textHtml + noteHtml + cnoteHtml + noteInput +
         '<div class="task-actions">' +
           '<button data-note="' + esc(t.id) + '">+ note</button>' +
+          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("task", t.text) + '">discuss</a>' +
           '<button class="del" data-del="' + esc(t.id) + '">delete</button>' +
         '</div></div></div>';
     }).join("") || '<p class="msg">No tasks yet — add one below.</p>';
@@ -408,7 +528,9 @@
     $("fronts").innerHTML = asArray(state.fronts).map(f =>
       '<div class="front"><h3>' + esc(f.title) + '</h3>' +
       '<div class="status">' + esc(f.status) + '</div>' +
-      (f.liveEdge ? '<div class="edge">' + esc(f.liveEdge) + '</div>' : "") + '</div>').join("");
+      (f.liveEdge ? '<div class="edge">' + esc(f.liveEdge) + '</div>' : "") +
+      '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("front", f.title) + '">discuss</a>' +
+      '</div>').join("");
 
     $("richardsNotes").innerHTML = currentFreeNotes().map((n, i) => {
       const isEditing = editingFreeNote === i;
@@ -418,6 +540,29 @@
           '<button class="note-del" data-freenotedel="' + i + '" aria-label="Delete note">×</button>';
       return '<p><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' + body + '</p>';
     }).join("");
+
+    // ideas
+    $("ideasList").innerHTML = currentIdeas().map(i => {
+      const threadHtml = i.thread.length
+        ? '<div class="idea-thread">' + i.thread.map(e =>
+            '<div class="idea-entry ' + (e.who === "claude" ? "claude" : "") + '">' +
+            '<span class="who">' + (e.who === "claude" ? "Claude" : "You") + '</span>' +
+            '<span class="body">' + esc(e.text) + '</span>' +
+            '<span class="ts">' + esc(fmtDateTs(e.ts)) + '</span></div>').join("") + '</div>'
+        : "";
+      const thoughtInput = thoughtingId === i.id
+        ? '<input class="note-input" data-thoughtinput="' + esc(i.id) + '" placeholder="Your thought… (Enter to save)">'
+        : "";
+      return '<div class="idea"><div class="idea-head">' +
+        '<h3>' + esc(i.title) + '</h3>' +
+        '<button class="idea-state ' + esc(i.state || "thrashing") + '" data-state="' + esc(i.id) + '" title="Click to change state">' + esc(i.state || "thrashing") + '</button>' +
+        '</div>' + threadHtml + thoughtInput +
+        '<div class="idea-actions">' +
+          '<button data-thought="' + esc(i.id) + '">+ thought</button>' +
+          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("idea", i.title) + '">discuss</a>' +
+          '<button class="del" data-ideadel="' + esc(i.id) + '">delete</button>' +
+        '</div></div>';
+    }).join("") || '<p class="msg" style="margin:0 0 16px;text-align:left">No ideas in play — seed one below.</p>';
 
     /* wire per-render handlers */
     document.querySelectorAll("[data-tick]").forEach(b => b.onclick = () => toggleDone(b.dataset.tick));
@@ -435,6 +580,19 @@
       el.onclick = () => { editingFreeNote = +el.dataset.freenotetext; render(); });
     document.querySelectorAll("[data-freenotedel]").forEach(b =>
       b.onclick = () => deleteFreeNote(+b.dataset.freenotedel));
+
+    document.querySelectorAll("[data-state]").forEach(b => b.onclick = () => cycleState(b.dataset.state));
+    document.querySelectorAll("[data-ideadel]").forEach(b => b.onclick = () => deleteIdea(b.dataset.ideadel));
+    document.querySelectorAll("[data-thought]").forEach(b =>
+      b.onclick = () => { thoughtingId = b.dataset.thought; render(); });
+    document.querySelectorAll("[data-thoughtinput]").forEach(inp => {
+      inp.focus();
+      inp.onkeydown = e => {
+        if (e.key === "Enter") addThought(inp.dataset.thoughtinput, inp.value);
+        if (e.key === "Escape") { thoughtingId = null; render(); }
+      };
+      inp.onblur = () => addThought(inp.dataset.thoughtinput, inp.value);
+    });
 
     document.querySelectorAll("[data-edit]").forEach(inp => {
       inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
@@ -472,6 +630,13 @@
     });
 
     show("app");
+  }
+
+  function discussUrl(kind, title){
+    const prompt = "Walk judgement focus — " + kind + ': "' + title + '". ' +
+      "Read the walk reference first, then give me focused judgement and advice on this specific " +
+      kind + ", and update its annotation in the reference.";
+    return "https://claude.ai/new?q=" + encodeURIComponent(prompt);
   }
 
   function fmtTs(ts){
