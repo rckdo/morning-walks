@@ -3,6 +3,11 @@
   v65.0 — 01/08/2026
 
   Changelog:
+  v90.0 — Live spend tally: every API response's token usage accumulated
+          into /apiUsage (calls, in/out tokens, since) for the desk app's
+          meter. Composer ASK-FIRST rule: central context gaps produce
+          NEED: questions instead of a draft; placeholders reserved for
+          peripheral gaps.
   v88.0 — Fabrication rule broadened from personal details to ALL context:
           no invented events, agreements, dates, figures or history in
           composer output; unknowns are written around or left as
@@ -67,6 +72,19 @@ admin.initializeApp({
 });
 const db = admin.database();
 const asArray = v => Array.isArray(v) ? v : Object.values(v || {});
+
+// Self-kept spend tally: every Anthropic response reports its own token usage;
+// accumulate it in /apiUsage so the desk app can show a live meter.
+function recordUsage(u) {
+  if (!u) return;
+  db.ref("apiUsage").transaction(cur => {
+    cur = cur || { calls: 0, inTok: 0, outTok: 0, since: new Date().toISOString() };
+    cur.calls += 1;
+    cur.inTok += u.input_tokens || 0;
+    cur.outTok += u.output_tokens || 0;
+    return cur;
+  }).catch(e => console.error("usage tally failed", e));
+}
 
 /* ============================== MCP tools ============================== */
 
@@ -191,6 +209,7 @@ async function runReview() {
     return { status: 502, body: "Anthropic API error " + resp.status };
   }
   const data = await resp.json();
+  recordUsage(data.usage);
   const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
 
   let verdict;
@@ -301,6 +320,7 @@ async function runReviewV2(ref) {
     return { status: 502, body: "Anthropic API error " + resp.status };
   }
   const data = await resp.json();
+  recordUsage(data.usage);
   const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
   let v;
   try { v = JSON.parse(text.replace(/```json|```/g, "").trim()); }
@@ -358,6 +378,8 @@ You receive the live walk board (JSON) as context. Use it to resolve names, situ
 
 HARD RULE — fabricate nothing. Every factual element of the draft must come from the board or the request: no invented personal details (surnames, genders, pronouns, honorifics, roles), and equally no invented events, meetings, conversations, agreements, dates, deadlines, figures, prices, quotes or history. If a fact would strengthen the email but you do not have it, either write around it or leave an explicit [bracketed placeholder] for Richard to fill in. A plausible invention is a failed draft — an obvious gap is a successful one.
 
+ASK FIRST when the gap is central: if the request lacks context essential to a credible draft (who it is actually to, what it must achieve, a key fact the email hinges on), do NOT draft. Instead output up to four lines, each starting "NEED: ", asking the specific questions. Richard adds the answers to his request and resubmits. Placeholders are for peripheral gaps; questions are for central ones.
+
 House style: British English. Concise — short paragraphs, no padding, lead with the point. Warm but direct. No corporate filler ("I hope this finds you well", "please don't hesitate"). Sign off as Richard.
 
 Output EXACTLY this format and nothing else:
@@ -405,6 +427,7 @@ async function runAssist(fnName, input) {
     return { status: 502, body: "Anthropic API error " + resp.status };
   }
   const data = await resp.json();
+  recordUsage(data.usage);
   const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
   return { status: 200, body: text || "(empty response)" };
 }
