@@ -3,6 +3,10 @@
   v65.0 — 01/08/2026
 
   Changelog:
+  v72.0 — Task commentary is thread-based: review marks append to each
+          task's thread[] (sticky conversations) with a new-or-reply bar,
+          legacy notes/claudeNote folded in; signature includes Richard's
+          thread entries.
   v65.0 — The watcher: /review/<REVIEW_SECRET> endpoint for Cloud Scheduler.
           Compares Richard-authored content (tasks, notes, idea thread
           entries) against the last review signature; exits free if nothing
@@ -90,7 +94,8 @@ function buildServer() {
 function richardSignature(ref) {
   const tasks = asArray(ref.todaysPlan?.tasks).map(t => ({
     id: t.id, text: t.text, done: !!t.done,
-    notes: asArray(t.notes).map(n => ({ ts: n.ts, text: n.text }))
+    notes: asArray(t.notes).map(n => ({ ts: n.ts, text: n.text })),
+    thread: asArray(t.thread).filter(e => e.who === "richard").map(e => ({ ts: e.ts, text: e.text }))
   }));
   const ideas = asArray(ref.ideas).map(i => ({
     id: i.id, title: i.title, state: i.state,
@@ -114,7 +119,7 @@ Return ONLY a JSON object, no markdown fences, no prose outside it:
 }
 
 Rules:
-- taskNotes: a mark for EVERY task. Verdict-flavoured, useful, max 12 words. Hard deadlines and unrecoverable items always outrank the merely urgent. Repeat carry-overs get named as such. Done tasks get brief acknowledgement. Weekends: judge accordingly — do not manufacture weekday urgency on a Saturday.
+- taskNotes: a proposed sticky reply per task where warranted (appended to the task thread only if new, or answering Richard's latest sticky). Verdict-flavoured, useful, max 12 words. Hard deadlines and unrecoverable items always outrank the merely urgent. Repeat carry-overs get named as such. Done tasks get brief acknowledgement. Weekends: judge accordingly — do not manufacture weekday urgency on a Saturday.
 - ideaReplies: ONLY for ideas listed as eligible in the user message, and ONLY when you have genuine steer — an angle, a risk, a sharpener, a connection to his fronts. Substance over cheerleading. Omit an idea entirely if you have nothing real to add. Never summarise the idea back at him.
 - take: teeth, earned. If nothing material changed or the day is on track, say so in one line — a clean bill is a valid verdict. Never invent urgency.
 - Judge the work, never the people. Fronts contain frank notes on named colleagues; do not extend or editorialise on personal assessments.
@@ -178,8 +183,19 @@ async function runReview() {
 
   const tasks = asArray(ref.todaysPlan?.tasks);
   tasks.forEach(t => {
+    // fold legacy fields into the unified thread, then append the new mark
+    const th = asArray(t.thread).map(e => ({ ts: e.ts || "", who: e.who === "claude" ? "claude" : "richard", text: e.text || "" }));
+    asArray(t.notes).forEach(n => th.push({ ts: n.ts || "", who: "richard", text: n.text || "" }));
+    if (t.claudeNote && t.claudeNote.text) th.push({ ts: t.claudeNote.ts || "", who: "claude", text: t.claudeNote.text });
+    th.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
     const mark = verdict.taskNotes && verdict.taskNotes[t.id];
-    if (mark) t.claudeNote = { ts: now, text: String(mark) };
+    const last = th[th.length - 1];
+    const lastClaude = [...th].reverse().find(e => e.who === "claude");
+    if (mark && (!last || last.who === "richard" || !lastClaude || lastClaude.text !== String(mark))) {
+      th.push({ ts: now, who: "claude", text: String(mark) });
+    }
+    t.thread = th;
+    delete t.notes; delete t.claudeNote;
   });
   if (ref.todaysPlan) ref.todaysPlan.tasks = tasks;
 
