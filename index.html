@@ -4,6 +4,11 @@
   v58.0 — 31/07/2026
 
   Changelog:
+  v69.0 — BUGFIX: single-commit inputs. Enter + blur could both fire the same
+          save around a re-render, duplicating notes/thoughts instead of
+          editing; every input commit is now guarded to run exactly once
+          (handlers detached on first commit). Delete buttons (notes) are
+          always visible on touch devices — hover-reveal kept for desktop.
   v68.0 — Ideas in play: first-class ideas section (title, state badge that
           cycles thrashing→parked→graduated on click, seed, running thread of
           You/Claude entries, add-a-thought per idea, new-idea box, delete).
@@ -102,6 +107,7 @@
   .note-del{font:inherit;font-size:0.8rem;color:var(--faint);background:none;border:none;
     cursor:pointer;padding:0 0 0 10px;flex:none;visibility:hidden}
   .task-notes li:hover .note-del,.footer-notes p:hover .note-del{visibility:visible}
+  @media (hover:none){.note-del{visibility:visible}}
   .note-del:hover{color:var(--danger)}
   .cnote{margin-top:5px;font-size:0.88rem;color:var(--amber);display:flex;align-items:baseline}
   .cnote .cl{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;
@@ -585,48 +591,52 @@
     document.querySelectorAll("[data-ideadel]").forEach(b => b.onclick = () => deleteIdea(b.dataset.ideadel));
     document.querySelectorAll("[data-thought]").forEach(b =>
       b.onclick = () => { thoughtingId = b.dataset.thought; render(); });
+    // Guard: an input commits exactly once — Enter and blur can otherwise
+    // both fire the same save around a re-render, duplicating entries.
+    function once(inp, save, cancel){
+      let done = false;
+      const commit = () => { if (done) return; done = true;
+        inp.onblur = null; inp.onkeydown = null; save(inp.value); };
+      inp.onkeydown = e => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { if (done) return; done = true;
+          inp.onblur = null; inp.onkeydown = null; cancel(); }
+      };
+      inp.onblur = commit;
+    }
+
     document.querySelectorAll("[data-thoughtinput]").forEach(inp => {
       inp.focus();
-      inp.onkeydown = e => {
-        if (e.key === "Enter") addThought(inp.dataset.thoughtinput, inp.value);
-        if (e.key === "Escape") { thoughtingId = null; render(); }
-      };
-      inp.onblur = () => addThought(inp.dataset.thoughtinput, inp.value);
+      once(inp,
+        v => addThought(inp.dataset.thoughtinput, v),
+        () => { thoughtingId = null; render(); });
     });
 
     document.querySelectorAll("[data-edit]").forEach(inp => {
       inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
-      inp.onkeydown = e => {
-        if (e.key === "Enter") saveText(inp.dataset.edit, inp.value);
-        if (e.key === "Escape") { editingId = null; render(); }
-      };
-      inp.onblur = () => saveText(inp.dataset.edit, inp.value);
+      once(inp,
+        v => saveText(inp.dataset.edit, v),
+        () => { editingId = null; render(); });
     });
     document.querySelectorAll("[data-noteinput]").forEach(inp => {
       inp.focus();
-      inp.onkeydown = e => {
-        if (e.key === "Enter") addNote(inp.dataset.noteinput, inp.value);
-        if (e.key === "Escape") { notingId = null; render(); }
-      };
-      inp.onblur = () => addNote(inp.dataset.noteinput, inp.value);
+      once(inp,
+        v => addNote(inp.dataset.noteinput, v),
+        () => { notingId = null; render(); });
     });
     document.querySelectorAll("[data-noteedit]").forEach(inp => {
       inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
       const [tid, i] = inp.dataset.noteedit.split(":");
-      inp.onkeydown = e => {
-        if (e.key === "Enter") saveNoteEdit(tid, +i, inp.value);
-        if (e.key === "Escape") { editingNote = null; render(); }
-      };
-      inp.onblur = () => saveNoteEdit(tid, +i, inp.value);
+      once(inp,
+        v => saveNoteEdit(tid, +i, v),
+        () => { editingNote = null; render(); });
     });
     document.querySelectorAll("[data-freenoteedit]").forEach(inp => {
       inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
       const i = +inp.dataset.freenoteedit;
-      inp.onkeydown = e => {
-        if (e.key === "Enter") saveFreeNoteEdit(i, inp.value);
-        if (e.key === "Escape") { editingFreeNote = null; render(); }
-      };
-      inp.onblur = () => saveFreeNoteEdit(i, inp.value);
+      once(inp,
+        v => saveFreeNoteEdit(i, v),
+        () => { editingFreeNote = null; render(); });
     });
 
     show("app");
