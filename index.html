@@ -4,6 +4,20 @@
   v82.0 — 01/08/2026
 
   Changelog:
+  v96.0 — Inbox-first (the PA front door): the note composer and open-note
+          list move from beneath the plan to a green capture panel at the
+          very top of the board — one indiscriminate inbox, phone-first,
+          "say anything, scatty is fine". Sorting stays where it belongs:
+          the compile authors structure from whatever lands here, the
+          hourly/manual mark resolves what it can mid-day. No behavioural
+          change to writes — same notes path, same rules.
+  v94.0 — Sticky tray: the auto-mark bar restyled as a yellow sticky in
+          Claude's hand — red-pen countdown to the free run, a counted
+          "N changes waiting" line (diffed against the server's stored
+          basis: ticks toggled, notes added/edited/removed, plan date),
+          and the mark-now button with its price. The red FAB is fully
+          retired from view (machinery kept, hidden). Requires server
+          v94 for the change count; degrades to v92 wording without it.
   v92.0 — Auto-mark bar (v2 zone): countdown to the next hourly scheduled
           judgement (:36 past the hour — RUN_MINUTE constant, change it if
           the schedule changes) plus a "mark now" button carrying a live
@@ -328,11 +342,20 @@
   .msg{color:var(--faint)}
   .hidden{display:none}
 
+  /* inbox — the front door */
+  .inbox{margin:18px 0 6px;padding:14px 16px;background:var(--stickyG);border-radius:2px;
+    box-shadow:0 3px 8px rgba(33,37,43,0.16);transform:rotate(0.3deg)}
+  .inbox h2{margin-bottom:10px;color:var(--biro)}
+  .inbox .composer{margin-top:0}
+  .inbox .composer textarea{min-height:76px;background:#fff}
+  .inbox #notesV2{margin-top:10px}
+
   /* auto-mark bar */
   .autobar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
-    margin:18px 0 6px;padding:10px 14px;background:var(--white);border-radius:8px}
-  .autobar .cdlabel{font-size:0.85rem;color:var(--faint)}
-  .autobar b{font-family:'IBM Plex Mono',monospace;font-weight:500;color:var(--ink)}
+    margin:18px 0 6px;padding:12px 16px;background:var(--stickyY);border-radius:2px;
+    box-shadow:0 3px 8px rgba(33,37,43,0.16);transform:rotate(-0.4deg)}
+  .autobar .cdlabel{font-family:'Caveat',cursive;font-weight:600;font-size:1.25rem;color:var(--redpen)}
+  .autobar b{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:0.95rem;color:var(--ink)}
   .autobar button{font:inherit;font-weight:500;cursor:pointer;background:var(--redpen);
     color:#fff;border:none;border-radius:6px;padding:7px 14px;margin-left:auto}
   .autobar button:disabled{opacity:0.55;cursor:wait}
@@ -435,6 +458,14 @@
   </div><!-- /v1zone -->
 
   <div id="v2zone" class="hidden">
+    <div class="inbox">
+      <h2>Inbox</h2>
+      <div class="composer">
+        <textarea id="noteComposer" placeholder="Say anything — scatty is fine. It lands here as a note; the next compile sorts it properly."></textarea>
+        <button id="noteSendBtn">Send</button>
+      </div>
+      <div id="notesV2"></div>
+    </div>
     <div class="autobar">
       <span class="cdlabel">Next auto-mark in <b id="cdTimer">--:--</b></span>
       <span class="est" id="markEst"></span>
@@ -444,14 +475,6 @@
       <section>
         <h2>Today's plan <b id="planDateV2"></b></h2>
         <div id="planList"></div>
-        <div class="footer-notes">
-          <h2>Notes</h2>
-          <div id="notesV2"></div>
-          <div class="composer">
-            <textarea id="noteComposer" placeholder="New note… Enter makes a new line; Send sticks it to the board."></textarea>
-            <button id="noteSendBtn">Send</button>
-          </div>
-        </div>
       </section>
       <aside>
         <h2>The board</h2>
@@ -875,7 +898,6 @@
 
     wireV2();
     show("app");
-    $("markBtn").classList.remove("hidden");
   }
 
   function wireV2(){
@@ -1030,7 +1052,6 @@
 
     wire();
     show("app");
-    $("markBtn").classList.remove("hidden");
   }
 
   function wire(){
@@ -1149,12 +1170,29 @@
         el.textContent = "free — nothing new to judge (auto run will skip too)";
         return;
       }
+      let countTxt = "";
+      if (reviewState && reviewState.basis) {
+        const b = reviewState.basis; let c = 0;
+        const doneNow = {};
+        asArray(state.projects).forEach(p => asArray(p.actions).forEach(a => { doneNow[a.id] = !!a.done; }));
+        new Set([...Object.keys(doneNow), ...Object.keys(b.done || {})]).forEach(id => {
+          if (!!doneNow[id] !== !!(b.done || {})[id]) c++;
+        });
+        const openNow = asArray(state.notes).filter(n => n.state === "open");
+        const nowHashes = {};
+        for (const n of openNow) nowHashes[n.id] = await sha256hex(String(n.text || ""));
+        new Set([...Object.keys(nowHashes), ...Object.keys(b.notes || {})]).forEach(id => {
+          if (nowHashes[id] !== (b.notes || {})[id]) c++;
+        });
+        if ((state.plan?.date || "") !== (b.date || "")) c++;
+        if (c) countTxt = c + " change" + (c > 1 ? "s" : "") + " waiting \u00b7 ";
+      }
       const ctx = { ...state };
       delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
       delete ctx.ideas; delete ctx.claudesTake;
       const tokens = JSON.stringify(ctx).length / 4 + 500;
       const pence = Math.max(1, Math.round((tokens * 3e-6 + 500 * 15e-6) * 79));
-      el.textContent = "\u2248 " + pence + "p \u00b7 or wait for the free run";
+      el.textContent = countTxt + "\u2248 " + pence + "p \u00b7 or wait for the free run";
     } catch { el.textContent = ""; }
   }
   $("markNowBtn").addEventListener("click", () => {
