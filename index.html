@@ -1,9 +1,16 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v76.0 — 01/08/2026
+  v82.0 — 01/08/2026
 
   Changelog:
+  v82.0 — Tools area (v2 zone): first AI function inside the app — the
+          Email composer. Give it context, Draft, and Claude writes the
+          email in place, board-aware (the server passes the live board as
+          context so names and situations resolve themselves). Calls the
+          server /assist endpoint authenticated with the signed-in user's
+          Firebase ID token — requires server v82 + ANTHROPIC_API_KEY on
+          the Cloud Run service. Copy button on output.
   v76.0 — DUAL-MODE v2. The app now renders the Director/Author board
           whenever walkReference/projects exists, and falls back to the
           full v1 view (tasks/fronts/ideas/free notes) untouched when it
@@ -305,6 +312,25 @@
   :is(button,input):focus-visible{outline:3px solid var(--amber);outline-offset:2px}
   .msg{color:var(--faint)}
   .hidden{display:none}
+
+  /* tools */
+  .tools{margin-top:48px;padding-top:20px;border-top:1px solid var(--hairline)}
+  .tool{background:var(--white);border-radius:8px;padding:16px 18px;max-width:720px}
+  .tool h3{font-family:'Fraunces',serif;font-weight:600;font-size:1.15rem;margin-bottom:4px}
+  .tool .hint{font-size:0.85rem;color:var(--faint);margin-bottom:10px}
+  .tool textarea{font:inherit;font-size:0.95rem;width:100%;min-height:96px;resize:vertical;
+    border:1px solid var(--hairline);border-radius:6px;padding:10px 12px;background:var(--paper)}
+  .tool .toolrow{display:flex;gap:10px;align-items:center;margin-top:10px}
+  .tool .toolrow button{font:inherit;font-weight:500;cursor:pointer;background:var(--ink);
+    color:var(--white);border:none;border-radius:6px;padding:8px 18px}
+  .tool .toolrow button:disabled{opacity:0.55;cursor:wait}
+  .tool .toolstatus{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--faint)}
+  .tool-output{margin-top:14px;border-top:1px solid var(--hairline);padding-top:12px;
+    white-space:pre-wrap;font-size:0.95rem;line-height:1.55}
+  .tool-output-head{display:flex;justify-content:space-between;align-items:baseline;margin-top:14px}
+  .tool-output-head .copybtn{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
+    border:none;cursor:pointer;padding:0}
+  .tool-output-head .copybtn:hover{color:var(--ink)}
 </style>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#FFD447">
@@ -408,6 +434,24 @@
         </div>
       </aside>
     </main>
+
+    <div class="tools">
+      <h2>Tools</h2>
+      <div class="tool">
+        <h3>Email composer</h3>
+        <div class="hint">Who it's to and what it needs to achieve — the board fills in the rest.</div>
+        <textarea id="composeInput" placeholder="e.g. To Louie at YIR — chase the feed-ingestion test date, friendly but firm, kick-offs lock Wednesday."></textarea>
+        <div class="toolrow">
+          <button id="composeBtn">Draft</button>
+          <span class="toolstatus" id="composeStatus"></span>
+        </div>
+        <div class="tool-output-head hidden" id="composeOutHead">
+          <span class="toolstatus">draft</span>
+          <button class="copybtn" id="composeCopy">copy</button>
+        </div>
+        <div class="tool-output hidden" id="composeOutput"></div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1037,6 +1081,43 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3500);
   }
+  /* ---------- Tools: /assist ---------- */
+  const ASSIST_URL = "https://morning-walks-419435526393.europe-west1.run.app/assist/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
+  async function runAssist(fn, input, statusEl, outEl, headEl, btn){
+    const user = firebase.auth().currentUser;
+    if (!user) { statusEl.textContent = "sign in first"; return; }
+    btn.disabled = true;
+    statusEl.textContent = "drafting…";
+    try {
+      const token = await user.getIdToken();
+      const r = await fetch(ASSIST_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", "authorization": "Bearer " + token },
+        body: JSON.stringify({ function: fn, input: input })
+      });
+      const text = await r.text();
+      if (!r.ok) throw new Error(text || ("HTTP " + r.status));
+      outEl.textContent = text;
+      outEl.classList.remove("hidden");
+      headEl.classList.remove("hidden");
+      statusEl.textContent = "";
+    } catch (e) {
+      statusEl.textContent = "failed: " + (e.message || e).slice(0, 120);
+    }
+    btn.disabled = false;
+  }
+  $("composeBtn").addEventListener("click", () => {
+    const input = $("composeInput").value.trim();
+    if (!input) { $("composeStatus").textContent = "give it some context first"; return; }
+    runAssist("compose_email", input, $("composeStatus"), $("composeOutput"),
+      $("composeOutHead"), $("composeBtn"));
+  });
+  $("composeCopy").addEventListener("click", () => {
+    navigator.clipboard.writeText($("composeOutput").textContent)
+      .then(() => toast("Draft copied."))
+      .catch(() => toast("Copy failed — select and copy manually."));
+  });
+
   $("markBtn").addEventListener("click", async () => {
     const btn = $("markBtn");
     btn.disabled = true;
