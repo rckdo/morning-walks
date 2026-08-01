@@ -1,9 +1,13 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v72.0 — 01/08/2026
+  v75.0 — 01/08/2026
 
   Changelog:
+  v75.0 — PWA: manifest link, theme colour and icon tags added to <head>.
+          Requires manifest.webmanifest + icon PNGs in the same folder.
+          Installable from Chrome on Android (menu > Install app). No
+          service worker — online-only by design. No other changes.
   v74.0 — Mark It button: big red fixed-position marker button (bottom right)
           that triggers a review — calls the server's /review endpoint
           directly (needs server v74 + ANTHROPIC_API_KEY deployed); if the
@@ -233,6 +237,12 @@
   .msg{color:var(--faint)}
   .hidden{display:none}
 </style>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#FFD447">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 </head>
 <body>
 
