@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<!--
+  MORNING WALK — DESK COMPANION
+  v76.0 — 01/08/2026
+
+  Changelog:
+  v76.0 — DUAL-MODE v2. The app now renders the Director/Author board
+          whenever walkReference/projects exists, and falls back to the
+          full v1 view (tasks/fronts/ideas/free notes) untouched when it
+          doesn't — deploy any time, cutover happens at the first v2
+          compile. v2 mode: Claude's take from take[] (history on tap),
+          plan from plan.actionIds with ticks writing to the underlying
+          action, board of projects with urgency-sorted actions
+          (provenance on hover), notes with open/resolved lifecycle
+          (open = editable green stickies, resolved = struck original +
+          red-pen resolution), multiline note composer (Enter = newline,
+          Send commits), board-changes panel from diffs[]. All v2 writes
+          path-scoped direct to RTDB, stamping meta.lastUpdated/updatedBy;
+          timestamps are wall-clock at write, never estimated. Claude-
+          authored content (projects, plan, take, diffs, resolutions) is
+          read-only in the app.
+  v75.0 — PWA: manifest link, theme colour and icon tags added to <head>.
+          Requires manifest.webmanifest + icon PNGs in the same folder.
+          Installable from Chrome on Android (menu > Install app). No
+          service worker — online-only by design. No other changes.
+  v74.0 — Mark It button: big red fixed-position marker button (bottom right)
+          that triggers a review — calls the server's /review endpoint
+          directly (needs server v74 + ANTHROPIC_API_KEY deployed); if the
+          endpoint isn't live it falls back to opening a Claude chat with the
+          judgement prompt pre-filled. Reply affordances beefed up: fat green
+          + buttons in the margin next to each stack (and on ideas) replace
+          the inline grey "reply"/"+ thought" text links. Small toast for
+          button feedback.
+  v73.0 — MOBILE FIX: the narrow-screen rule repositioned .stack instead of
+          its wrapper .marginCell (the actual grid child), so sticky stacks
+          collapsed into the 22px tick column on phones. Now the margin cell
+          itself drops beneath the task body at full width on narrow screens.
+  v72.0 — Margin conversations. Per-task notes and Claude marks unify into a
+          single thread per task, rendered in the right-hand margin as a
+          sticky stack: Claude in yellow/red pen (Caveat), Richard in
+          green/biro blue (Kalam). Collapsed shows the latest sticky with
+          peeking corners of earlier ones; tap fans the whole conversation.
+          Reply adds a green sticky; your entries are editable/deletable in
+          the fanned view. Legacy notes[] and claudeNote fields are folded
+          into the thread at read time and migrated on first write, so old
+          data survives and old writers (previous skill/server versions)
+          remain compatible. The "+ note" body mechanism is retired.
+          Free notes, ideas, fronts, take panel unchanged from v71.0.
+  v71.0 — Literal margin with sticky marks; take panel as large sticky.
+  v70.0 — Red pen voice for Claude content.
+  v69.0 — Single-commit input guard (duplicate fix); touch-visible deletes.
+  v68.0 — Ideas in play; Reviewed stamp; front marks retired.
+  v47.0 — Full task editing. v13.0 — initial read-only build.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Morning Walk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Kalam:wght@400;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F3F5F7; --ink:#21252B; --faint:#5C6470; --hairline:#D6DBE0;
+    --amber:#A8620D; --amber-bg:#F6E8D4; --moss:#3F6B3F; --white:#FFFFFF;
+    --danger:#8C2F2F; --redpen:#BE342C; --biro:#1D3A6B;
+    --stickyY:#FBF3B9; --stickyYd:#F3E9A0; --stickyG:#DCEAC4; --stickyGd:#CCE0AE;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{font-size:16px}
+  body{background:var(--paper);color:var(--ink);font-family:'IBM Plex Sans',sans-serif;line-height:1.55;min-height:100vh}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 24px 64px}
+
+  header{display:flex;align-items:baseline;justify-content:space-between;gap:16px;flex-wrap:wrap;
+    padding:28px 0 18px;border-bottom:1px solid var(--ink)}
+  header h1{font-family:'Fraunces',serif;font-weight:600;font-size:1.7rem;letter-spacing:-0.01em}
+  header h1 span{color:var(--faint);font-weight:500}
+  .stamp{font-family:'IBM Plex Mono',monospace;font-size:0.8rem;color:var(--faint)}
+  #saving{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--amber);
+    opacity:0;transition:opacity .2s}
+  #saving.on{opacity:1}
+  .stale{margin-top:14px;padding:10px 14px;background:var(--amber-bg);color:var(--amber);
+    font-size:0.9rem;font-weight:500;border-radius:6px}
+
+  /* Claude's take — big sticky */
+  .take{margin-top:22px;background:var(--stickyY);border-radius:2px;padding:14px 18px;
+    box-shadow:0 3px 8px rgba(33,37,43,0.16);transform:rotate(-0.4deg)}
+  .take-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px}
+  .take-label{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--faint)}
+  .take-head .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--faint)}
+  .take-text{font-family:'Caveat',cursive;font-weight:500;font-size:1.35rem;line-height:1.35;color:var(--redpen)}
+  .take-more{font:inherit;font-size:0.8rem;color:var(--faint);background:none;border:none;
+    cursor:pointer;padding:0;margin-top:8px}
+  .take-more:hover{color:var(--ink)}
+  .take-history{margin-top:10px;border-top:1px solid rgba(33,37,43,0.15);padding-top:8px}
+  .take-history p{font-size:0.88rem;color:var(--faint);padding:4px 0}
+  .take-history .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;margin-right:8px}
+
+  main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:56px;margin-top:34px}
+  @media(max-width:820px){main{grid-template-columns:1fr;gap:44px}}
+  h2{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;
+    color:var(--faint);margin-bottom:18px}
+  h2 b{color:var(--ink);font-weight:600}
+
+  /* tasks: tick | body | margin */
+  .task{display:grid;grid-template-columns:22px minmax(0,1fr) 172px;gap:14px;
+    padding:13px 0;border-bottom:1px solid var(--hairline)}
+  @media(max-width:820px){.task{grid-template-columns:22px minmax(0,1fr)}
+    .task .marginCell{grid-column:2;margin-top:8px;max-width:340px}}
+  .tick{flex:none;width:22px;height:22px;margin-top:2px;border:2px solid var(--faint);
+    border-radius:50%;display:flex;align-items:center;justify-content:center;
+    font-size:0.8rem;color:var(--white);cursor:pointer;background:none;padding:0}
+  .task.done .tick{background:var(--moss);border-color:var(--moss)}
+  .task.done .task-text{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
+  .task-body{min-width:0}
+  .task-text{font-size:1.05rem;cursor:text;border-radius:4px}
+  .task-text:hover{background:var(--white)}
+  input.edit{font:inherit;width:100%;border:1px solid var(--hairline);
+    border-radius:4px;padding:2px 6px;background:var(--white)}
+  input.edit.task-size{font-size:1.05rem}
+  .task-actions{margin-top:5px;display:flex;gap:14px}
+  .task-actions button{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
+    border:none;cursor:pointer;padding:0}
+  .task-actions button:hover{color:var(--ink)}
+  .task-actions .del:hover{color:var(--danger)}
+
+  /* margin sticky stacks */
+  .marginCell{display:flex;flex-direction:column;gap:8px;align-self:start;min-width:0}
+  .stack{position:relative;cursor:pointer}
+  .sticky{border-radius:2px;box-shadow:0 2px 6px rgba(33,37,43,0.16);
+    padding:8px 11px 6px;line-height:1.25;position:relative;z-index:2;
+    word-wrap:break-word}
+  .s-claude{background:var(--stickyY);color:var(--redpen);
+    font-family:'Caveat',cursive;font-weight:500;font-size:1.15rem}
+  .s-mine{background:var(--stickyG);color:var(--biro);
+    font-family:'Kalam',cursive;font-weight:400;font-size:0.95rem;line-height:1.35}
+  .sticky .srow{display:flex;align-items:baseline;gap:8px;margin-top:3px}
+  .sticky .ts{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;color:var(--faint);flex:1}
+  .sticky .sbtn{font-family:'IBM Plex Sans',sans-serif;font-size:0.72rem;color:var(--faint);
+    background:none;border:none;cursor:pointer;padding:0}
+  .sticky .sbtn:hover{color:var(--danger)}
+  .stack:not(.open) .sticky{transform:rotate(-1.4deg)}
+  .task:nth-child(even) .stack:not(.open) .sticky{transform:rotate(1.1deg)}
+  .peek{position:absolute;inset:0;border-radius:2px;box-shadow:0 2px 5px rgba(33,37,43,0.14)}
+  .peek.py{background:var(--stickyYd)} .peek.pg{background:var(--stickyGd)}
+  .peek.p1{transform:rotate(2.2deg) translate(5px,4px);z-index:1}
+  .peek.p2{transform:rotate(-2.6deg) translate(-4px,7px);z-index:0}
+  .stack.open .sticky{margin-bottom:8px;cursor:default}
+  .stack.open .sticky:nth-child(odd){transform:rotate(-1deg)}
+  .stack.open .sticky:nth-child(even){transform:rotate(0.8deg)}
+  .stack .count{position:absolute;top:-7px;right:-7px;z-index:3;background:var(--ink);
+    color:var(--white);font-family:'IBM Plex Mono',monospace;font-size:0.62rem;
+    border-radius:99px;padding:1px 6px;pointer-events:none}
+  .reply-wrap input{font:inherit;font-size:0.9rem;width:100%;border:1px solid var(--stickyGd);
+    border-radius:4px;padding:6px 8px;background:var(--stickyG);color:var(--biro)}
+  input.edit.sticky-size{font-size:0.9rem;background:var(--white)}
+
+  /* fronts */
+  .front{padding:18px 0;border-bottom:1px solid var(--hairline)}
+  .front:first-of-type{padding-top:2px}
+  .front h3{font-family:'Fraunces',serif;font-weight:600;font-size:1.15rem;margin-bottom:4px}
+  .front .status{font-size:0.92rem}
+  .front .edge{font-size:0.92rem;color:var(--amber);margin-top:6px;font-weight:500}
+  .front .edge::before{content:"→ ";font-weight:400}
+  .front .discuss{display:inline-block;margin-top:6px}
+
+  /* ideas */
+  .ideas{margin-top:48px;padding-top:20px;border-top:1px solid var(--hairline)}
+  .idea{background:var(--white);border-radius:8px;padding:16px 18px;margin-bottom:16px}
+  .idea-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+  .idea-head h3{font-family:'Fraunces',serif;font-weight:600;font-size:1.15rem;flex:1;min-width:0}
+  .idea-state{font:inherit;font-size:0.72rem;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.06em;border:1px solid var(--hairline);border-radius:99px;
+    padding:2px 10px;background:none;cursor:pointer;color:var(--faint)}
+  .idea-state.thrashing{color:var(--amber);border-color:var(--amber)}
+  .idea-state.graduated{color:var(--moss);border-color:var(--moss)}
+  .idea-thread{margin-top:12px;border-top:1px solid var(--hairline);padding-top:8px}
+  .idea-entry{display:flex;align-items:baseline;padding:4px 0;font-size:0.93rem;gap:0}
+  .idea-entry .who{font-size:0.7rem;font-weight:600;text-transform:uppercase;
+    letter-spacing:0.06em;margin-right:10px;flex:none;width:52px;color:var(--faint)}
+  .idea-entry.claude{font-family:'Caveat',cursive;font-weight:500;font-size:1.2rem;
+    line-height:1.3;color:var(--redpen)}
+  .idea-entry.claude .who{font-family:'IBM Plex Sans',sans-serif;color:var(--redpen)}
+  .idea-entry .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;
+    color:var(--faint);margin-left:10px;flex:none}
+  .idea-entry span.body{flex:1;min-width:0}
+  .idea-actions{margin-top:8px;display:flex;gap:14px}
+  .idea-actions button{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
+    border:none;cursor:pointer;padding:0}
+  .idea-actions button:hover{color:var(--ink)}
+  .idea-actions .del:hover{color:var(--danger)}
+  .note-input{font:inherit;font-size:0.9rem;width:100%;border:1px solid var(--hairline);
+    border-radius:4px;padding:6px 8px;background:var(--white);margin-top:6px}
+  .add-idea{background:var(--white);border-radius:8px;padding:14px 18px;display:flex;
+    flex-direction:column;gap:8px}
+  .add-idea input{font:inherit;border:1px solid var(--hairline);border-radius:4px;
+    padding:6px 8px;background:var(--paper)}
+  .add-idea .row{display:flex;gap:10px}
+  .add-idea .row input{flex:1}
+  .add-idea button{font:inherit;font-weight:500;cursor:pointer;background:var(--ink);
+    color:var(--white);border:none;border-radius:6px;padding:6px 14px;align-self:flex-start}
+
+  .add-task{display:flex;gap:10px;margin-top:16px}
+  .add-task input{font:inherit;font-size:0.9rem;margin-top:0;flex:1;border:1px solid var(--hairline);
+    border-radius:4px;padding:6px 8px;background:var(--white)}
+  .add-task button{font:inherit;font-weight:500;cursor:pointer;background:var(--ink);
+    color:var(--white);border:none;border-radius:6px;padding:6px 14px}
+
+  /* free notes */
+  .footer-notes{margin-top:48px;padding-top:20px;border-top:1px solid var(--hairline)}
+  .footer-notes p{font-size:0.95rem;color:var(--faint);padding:2px 0;display:flex;align-items:baseline}
+  .footer-notes .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;margin-right:8px;flex:none}
+  .note-text{cursor:text;border-radius:3px;flex:1;min-width:0}
+  .note-text:hover{background:var(--white)}
+  input.edit.note-size{font-size:0.88rem;margin-top:2px}
+  .note-del{font:inherit;font-size:0.8rem;color:var(--faint);background:none;border:none;
+    cursor:pointer;padding:0 0 0 10px;flex:none;visibility:hidden}
+  .footer-notes p:hover .note-del{visibility:visible}
+  @media (hover:none){.note-del{visibility:visible}}
+  .add-note-free{display:flex;gap:10px;margin-top:10px}
+  .add-note-free input{font:inherit;font-size:0.9rem;margin-top:0;flex:1;border:1px solid var(--hairline);
+    border-radius:4px;padding:6px 8px;background:var(--white)}
+  .add-note-free button{font:inherit;font-weight:500;cursor:pointer;background:var(--ink);
+    color:var(--white);border:none;border-radius:6px;padding:6px 14px}
+
+  .discuss{font-size:0.8rem;color:var(--faint);text-decoration:none}
+  .discuss:hover{color:var(--ink);text-decoration:underline}
+
+  /* Mark It button + plus buttons + toast */
+  .fab{position:fixed;bottom:22px;right:22px;z-index:50;width:64px;height:64px;
+    border-radius:50%;border:none;cursor:pointer;background:var(--redpen);color:#fff;
+    font-family:'Caveat',cursive;font-weight:600;font-size:1.05rem;line-height:1;
+    box-shadow:0 6px 16px rgba(190,52,44,0.45);transition:transform .12s}
+  .fab:hover{transform:scale(1.06)}
+  .fab:disabled{opacity:0.6;cursor:wait}
+  .plusbtn{width:34px;height:34px;border-radius:50%;border:none;cursor:pointer;
+    background:var(--stickyG);color:var(--biro);font-size:1.3rem;font-weight:600;
+    line-height:1;box-shadow:0 2px 5px rgba(33,37,43,0.18);align-self:flex-start;flex:none}
+  .plusbtn:hover{background:var(--stickyGd)}
+  .toast{position:fixed;bottom:96px;right:22px;z-index:50;background:var(--ink);
+    color:#fff;font-size:0.85rem;padding:10px 14px;border-radius:8px;max-width:280px;
+    opacity:0;transition:opacity .25s;pointer-events:none}
+  .toast.on{opacity:1}
+
+  /* ---------- v2 board (Director/Author) ---------- */
+  .proj{padding:16px 0;border-bottom:1px solid var(--hairline)}
+  .proj:first-of-type{padding-top:2px}
+  .proj-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .proj-head h3{font-family:'Fraunces',serif;font-weight:600;font-size:1.1rem;flex:1;min-width:0}
+  .pstate{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;text-transform:uppercase;
+    letter-spacing:0.06em;border:1px solid var(--hairline);border-radius:99px;
+    padding:1px 8px;color:var(--faint)}
+  .pstate.active{color:var(--amber);border-color:var(--amber)}
+  .pstate.blue-sky{color:var(--biro);border-color:var(--biro)}
+  .proj .summary{font-size:0.9rem;color:var(--faint);margin-top:4px;margin-bottom:4px}
+  .act{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:9px;align-items:start;padding:5px 0}
+  .act .tick{width:18px;height:18px;margin-top:3px;font-size:0.65rem;border-width:1.5px}
+  .act.done .atext{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
+  .atext{font-size:0.95rem;min-width:0}
+  .urg{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;text-transform:uppercase;
+    letter-spacing:0.05em;margin-top:4px;color:var(--faint)}
+  .urg.now{color:var(--amber);font-weight:500}
+
+  /* v2 plan */
+  .pitem{display:grid;grid-template-columns:22px minmax(0,1fr);gap:14px;padding:11px 0;
+    border-bottom:1px solid var(--hairline)}
+  .pitem .ptext{font-size:1.05rem}
+  .pitem.done .ptext{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
+  .pitem .pproj{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--faint);margin-top:2px}
+
+  /* v2 notes: open = green sticky, resolved = struck original + red-pen resolution */
+  .noteOpen{background:var(--stickyG);color:var(--biro);font-family:'Kalam',cursive;
+    border-radius:2px;box-shadow:0 2px 6px rgba(33,37,43,0.16);padding:9px 12px 7px;
+    margin-bottom:10px;font-size:0.95rem;line-height:1.4;white-space:pre-wrap;overflow-wrap:break-word;
+    transform:rotate(-0.5deg)}
+  .noteOpen:nth-child(even){transform:rotate(0.5deg)}
+  .noteOpen .srow{display:flex;align-items:baseline;gap:8px;margin-top:4px;
+    font-family:'IBM Plex Sans',sans-serif;white-space:normal}
+  .noteRes{padding:7px 0;border-bottom:1px solid var(--hairline)}
+  .noteRes .orig{font-size:0.85rem;color:var(--faint);text-decoration:line-through;
+    text-decoration-thickness:1px}
+  .noteRes .resol{font-family:'Caveat',cursive;font-weight:500;font-size:1.15rem;
+    line-height:1.3;color:var(--redpen)}
+  .noteRes .resol .ts{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;color:var(--faint);margin-left:8px}
+  .composer{margin-top:12px;display:flex;flex-direction:column;gap:8px}
+  .composer textarea{font-family:'Kalam',cursive;font-size:0.95rem;line-height:1.4;color:var(--biro);
+    background:var(--stickyG);border:1px solid var(--stickyGd);border-radius:4px;
+    padding:8px 10px;min-height:64px;resize:vertical;width:100%}
+  .composer button{font:inherit;font-weight:500;cursor:pointer;background:var(--ink);
+    color:var(--white);border:none;border-radius:6px;padding:6px 16px;align-self:flex-start}
+  textarea.noteEditArea{font-family:'Kalam',cursive;font-size:0.95rem;line-height:1.4;color:var(--biro);
+    background:var(--white);border:1px solid var(--stickyGd);border-radius:4px;
+    padding:6px 8px;width:100%;min-height:52px;resize:vertical}
+
+  /* v2 diffs */
+  .diffs .dhead{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--faint)}
+  .diffs .dwhat{margin-top:2px;font-size:0.85rem}
+  .diffs .dwhy{color:var(--faint);font-size:0.82rem;margin-bottom:6px}
+  .gate,.msg{max-width:360px;margin:20vh auto 0;text-align:center}
+  .gate h1{font-family:'Fraunces',serif;font-weight:600;font-size:1.6rem;margin-bottom:8px}
+  .gate p{color:var(--faint);font-size:0.95rem;margin-bottom:24px}
+  .gate button{font:inherit;font-weight:500;cursor:pointer;background:var(--ink);
+    color:var(--white);border:none;border-radius:8px;padding:12px 22px}
+  :is(button,input):focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+  .msg{color:var(--faint)}
+  .hidden{display:none}
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#FFD447">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+</head>
+<body>
+
+<div id="gate" class="gate hidden">
+  <h1>Morning Walk</h1>
+  <p>Sign in to load today's reference.</p>
+  <button id="signin">Sign in with Google</button>
+</div>
+
+<div id="loading" class="msg">Loading…</div>
+<div id="error" class="msg hidden"></div>
+
+<div id="app" class="wrap hidden">
+  <header>
+    <h1>Morning Walk <span>· Rolling Reference</span></h1>
+    <div>
+      <span id="saving">saving…</span>
+      <span class="stamp" id="stamp"></span>
+    </div>
+  </header>
+  <div id="staleNotice" class="stale hidden"></div>
+  <div id="takePanel" class="take hidden">
+    <div class="take-head">
+      <span class="take-label">Claude's take</span>
+      <span class="ts" id="takeTs"></span>
+    </div>
+    <div class="take-text" id="takeText"></div>
+    <button class="take-more hidden" id="takeMoreBtn"></button>
+    <div class="take-history hidden" id="takeHistory"></div>
+  </div>
+
+  <div id="v1zone">
+  <main>
+    <section>
+      <h2>Today's plan <b id="planDate"></b></h2>
+      <div id="tasks"></div>
+      <div class="add-task">
+        <input id="newTask" type="text" placeholder="Add a task…" aria-label="Add a task">
+        <button id="addTaskBtn">Add</button>
+      </div>
+    </section>
+    <aside>
+      <h2>Active fronts</h2>
+      <div id="fronts"></div>
+    </aside>
+  </main>
+
+  <div class="ideas">
+    <h2>Ideas in play</h2>
+    <div id="ideasList"></div>
+    <div class="add-idea">
+      <div class="row">
+        <input id="newIdeaTitle" type="text" placeholder="New idea — title…" aria-label="New idea title">
+      </div>
+      <div class="row">
+        <input id="newIdeaSeed" type="text" placeholder="The thought itself… (Enter to add)" aria-label="New idea seed">
+      </div>
+      <button id="addIdeaBtn">Add idea</button>
+    </div>
+  </div>
+
+  <div class="footer-notes">
+    <h2>Notes</h2>
+    <div id="richardsNotes"></div>
+    <div class="add-note-free">
+      <input id="newFreeNote" type="text" placeholder="Add a note…" aria-label="Add a note">
+      <button id="addFreeNoteBtn">Add</button>
+    </div>
+  </div>
+  </div><!-- /v1zone -->
+
+  <div id="v2zone" class="hidden">
+    <main>
+      <section>
+        <h2>Today's plan <b id="planDateV2"></b></h2>
+        <div id="planList"></div>
+        <div class="footer-notes">
+          <h2>Notes</h2>
+          <div id="notesV2"></div>
+          <div class="composer">
+            <textarea id="noteComposer" placeholder="New note… Enter makes a new line; Send sticks it to the board."></textarea>
+            <button id="noteSendBtn">Send</button>
+          </div>
+        </div>
+      </section>
+      <aside>
+        <h2>The board</h2>
+        <div id="board"></div>
+        <div class="diffs">
+          <h2 style="margin:28px 0 8px">Board changes</h2>
+          <div id="diffLatest"></div>
+          <button class="take-more hidden" id="diffMoreBtn"></button>
+          <div id="diffHistory" class="hidden"></div>
+        </div>
+      </aside>
+    </main>
+  </div>
+</div>
+
+<button id="markBtn" class="fab hidden" title="Get Claude to mark the board">mark<br>it</button>
+<div id="toast" class="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey: "AIzaSyA3ga4wTbLELE3jvrl40j7OclsYCt8PtIo",
+    authDomain: "morning-walks-42eb6.firebaseapp.com",
+    databaseURL: "https://morning-walks-42eb6-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "morning-walks-42eb6"
+  });
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const show = id => { ["gate","loading","error","app"].forEach(x=>$(x).classList.add("hidden"));
+    $(id).classList.remove("hidden"); };
+  const asArray = v => Array.isArray(v) ? v : Object.values(v || {});
+
+  let state = null;
+  let editingId = null;        // task text edit
+  let expandedId = null;       // task id with fanned stack
+  let replyingId = null;       // task id with open reply input
+  let editingEntry = null;     // {taskId, idx} sticky being edited (own entries only)
+  let editingFreeNote = null;
+  let thoughtingId = null;
+  let showTakeHistory = false;
+
+  const IDEA_STATES = ["thrashing", "parked", "graduated"];
+
+  $("signin").addEventListener("click", () =>
+    firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
+      .catch(e => { $("error").textContent = "Sign-in failed: " + e.message; show("error"); }));
+
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) { show("gate"); return; }
+    show("loading");
+    firebase.database().ref("walkReference").on("value",
+      snap => { state = snap.val(); render(); },
+      err  => { $("error").textContent = err.code === "PERMISSION_DENIED"
+        ? "This account doesn't have access to the reference."
+        : "Couldn't load data: " + err.message; show("error"); });
+  });
+
+  /* ---------- writes (path-scoped) ---------- */
+  let savingTimer;
+  function flashSaving(){
+    $("saving").classList.add("on");
+    clearTimeout(savingTimer);
+    savingTimer = setTimeout(() => $("saving").classList.remove("on"), 900);
+  }
+  function saveTasks(tasks){
+    flashSaving();
+    return firebase.database().ref("walkReference/todaysPlan/tasks").set(tasks.map(cleanTask))
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  function saveIdeas(ideas){
+    flashSaving();
+    return firebase.database().ref("walkReference/ideas").set(ideas)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  function saveFreeNotes(notes){
+    flashSaving();
+    return firebase.database().ref("walkReference/richardsNotes").set(notes)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+
+  /* ---------- task thread model ----------
+     Unified thread per task. Legacy fields (notes[], claudeNote) are folded
+     in at read time and stripped on first write — migration by use. */
+  function entriesFor(t){
+    const out = [];
+    asArray(t.thread).forEach(e => out.push({
+      ts: e.ts || "", who: e.who === "claude" ? "claude" : "richard", text: e.text || "" }));
+    asArray(t.notes).forEach(n => out.push({ ts: n.ts || "", who: "richard", text: n.text || "" }));
+    if (t.claudeNote && t.claudeNote.text)
+      out.push({ ts: t.claudeNote.ts || "", who: "claude", text: t.claudeNote.text });
+    const seen = new Set();
+    const dedup = out.filter(e => {
+      const k = e.who + "|" + e.ts + "|" + e.text;
+      if (seen.has(k)) return false; seen.add(k); return true;
+    });
+    dedup.sort((a,b) => String(a.ts).localeCompare(String(b.ts)));
+    return dedup;
+  }
+  function cleanTask(t){
+    return { id: t.id, text: t.text, done: !!t.done,
+      frontId: t.frontId ?? null, thread: entriesFor(t) };
+  }
+  function currentTasks(){ return asArray(state?.todaysPlan?.tasks).map(t => ({ ...t })); }
+
+  /* ---------- task actions ---------- */
+  function withTask(id, fn){
+    const tasks = currentTasks();
+    const t = tasks.find(x => x.id === id);
+    if (!t) { render(); return; }
+    fn(t, tasks);
+  }
+  function toggleDone(id){ withTask(id, (t, tasks) => { t.done = !t.done; saveTasks(tasks); }); }
+  function saveText(id, text){
+    editingId = null;
+    const clean = text.trim();
+    withTask(id, (t, tasks) => {
+      if (!clean || clean === t.text) { render(); return; }
+      t.text = clean; saveTasks(tasks);
+    });
+  }
+  function addReply(id, text){
+    replyingId = null;
+    const clean = text.trim();
+    if (!clean) { render(); return; }
+    withTask(id, (t, tasks) => {
+      t.thread = entriesFor(t);
+      t.thread.push({ ts: new Date().toISOString(), who: "richard", text: clean });
+      delete t.notes; delete t.claudeNote;
+      expandedId = id;
+      saveTasks(tasks);
+    });
+  }
+  function saveEntryEdit(id, idx, text){
+    editingEntry = null;
+    const clean = text.trim();
+    withTask(id, (t, tasks) => {
+      const th = entriesFor(t);
+      if (!th[idx] || th[idx].who !== "richard" || !clean || clean === th[idx].text) { render(); return; }
+      th[idx].text = clean;
+      t.thread = th; delete t.notes; delete t.claudeNote;
+      saveTasks(tasks);
+    });
+  }
+  function deleteEntry(id, idx){
+    withTask(id, (t, tasks) => {
+      const th = entriesFor(t);
+      if (!th[idx]) return;
+      if (!confirm("Delete this sticky?")) return;
+      th.splice(idx, 1);
+      t.thread = th; delete t.notes; delete t.claudeNote;
+      saveTasks(tasks);
+    });
+  }
+  function deleteTask(id){
+    withTask(id, (t, tasks) => {
+      if (!confirm('Delete task: "' + t.text + '"?')) return;
+      saveTasks(tasks.filter(x => x.id !== id));
+    });
+  }
+  $("addTaskBtn").addEventListener("click", () => {
+    const clean = $("newTask").value.trim();
+    if (!clean) return;
+    const tasks = currentTasks();
+    tasks.push({ id: "t" + Date.now(), text: clean, done: false, frontId: null, thread: [] });
+    $("newTask").value = "";
+    saveTasks(tasks);
+  });
+  $("newTask").addEventListener("keydown", e => { if (e.key === "Enter") $("addTaskBtn").click(); });
+
+  /* ---------- ideas ---------- */
+  function currentIdeas(){ return asArray(state?.ideas).map(i => ({ ...i, thread: asArray(i.thread) })); }
+  function addThought(id, text){
+    thoughtingId = null;
+    const clean = text.trim();
+    if (!clean) { render(); return; }
+    const ideas = currentIdeas();
+    const idea = ideas.find(x => x.id === id); if (!idea) { render(); return; }
+    idea.thread.push({ ts: new Date().toISOString(), who: "richard", text: clean });
+    saveIdeas(ideas);
+  }
+  function cycleState(id){
+    const ideas = currentIdeas();
+    const idea = ideas.find(x => x.id === id); if (!idea) return;
+    idea.state = IDEA_STATES[(IDEA_STATES.indexOf(idea.state) + 1) % IDEA_STATES.length];
+    saveIdeas(ideas);
+  }
+  function deleteIdea(id){
+    const ideas = currentIdeas();
+    const idea = ideas.find(x => x.id === id); if (!idea) return;
+    if (!confirm('Delete idea "' + idea.title + '" and its whole thread?')) return;
+    saveIdeas(ideas.filter(x => x.id !== id));
+  }
+  $("addIdeaBtn").addEventListener("click", () => {
+    const title = $("newIdeaTitle").value.trim();
+    const seed = $("newIdeaSeed").value.trim();
+    if (!title || !seed) return;
+    const ideas = currentIdeas();
+    const now = new Date();
+    ideas.push({ id: "idea-" + now.getTime(), title, seed, state: "thrashing",
+      opened: now.toLocaleDateString("en-GB"),
+      thread: [{ ts: now.toISOString(), who: "richard", text: seed }] });
+    $("newIdeaTitle").value = ""; $("newIdeaSeed").value = "";
+    saveIdeas(ideas);
+  });
+  $("newIdeaSeed").addEventListener("keydown", e => { if (e.key === "Enter") $("addIdeaBtn").click(); });
+
+  /* ---------- free notes ---------- */
+  function currentFreeNotes(){ return asArray(state?.richardsNotes)
+    .map(n => typeof n === "string" ? { ts: "", text: n } : { ...n }); }
+  $("addFreeNoteBtn").addEventListener("click", () => {
+    const clean = $("newFreeNote").value.trim();
+    if (!clean) return;
+    const notes = currentFreeNotes();
+    notes.push({ ts: new Date().toISOString(), text: clean });
+    $("newFreeNote").value = "";
+    saveFreeNotes(notes);
+  });
+  $("newFreeNote").addEventListener("keydown", e => { if (e.key === "Enter") $("addFreeNoteBtn").click(); });
+  function saveFreeNoteEdit(idx, text){
+    editingFreeNote = null;
+    const clean = text.trim();
+    const notes = currentFreeNotes();
+    if (!notes[idx] || !clean || clean === notes[idx].text) { render(); return; }
+    notes[idx].text = clean;
+    saveFreeNotes(notes);
+  }
+  function deleteFreeNote(idx){
+    const notes = currentFreeNotes();
+    if (!notes[idx]) return;
+    if (!confirm("Delete this note?")) return;
+    notes.splice(idx, 1);
+    saveFreeNotes(notes);
+  }
+
+  /* ---------- v2 (Director/Author board) ----------
+     Active whenever walkReference/projects exists. The app writes directly to
+     RTDB (no server in the path), path-scoped: action done flags by index,
+     notes as a whole array. meta.lastUpdated/updatedBy touched on every write.
+     Timestamps are client wall-clock at the moment of write — never estimated,
+     never rounded forward. Claude authors projects/plan/take/diffs/resolutions;
+     the app treats all of those as read-only. */
+  const URG_ORDER = { now: 0, soon: 1, later: 2 };
+  let editingNoteId = null;
+  let showDiffHistory = false;
+
+  function touchMeta(){
+    return firebase.database().ref("walkReference/meta").update({
+      lastUpdated: new Date().toISOString(), updatedBy: "richard" }).catch(() => {});
+  }
+  function v2Notes(){ return asArray(state?.notes).map(n => ({ ...n })); }
+  function findAction(id){
+    const ps = asArray(state?.projects);
+    for (let pi = 0; pi < ps.length; pi++) {
+      const as = asArray(ps[pi].actions);
+      for (let ai = 0; ai < as.length; ai++)
+        if (as[ai] && as[ai].id === id) return { p: ps[pi], a: as[ai], pi, ai };
+    }
+    return null;
+  }
+  function toggleActionDone(id){
+    const f = findAction(id); if (!f) return;
+    flashSaving();
+    firebase.database().ref("walkReference/projects/" + f.pi + "/actions/" + f.ai + "/done")
+      .set(!f.a.done).then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  function saveNotesV2(notes){
+    flashSaving();
+    return firebase.database().ref("walkReference/notes").set(notes)
+      .then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  $("noteSendBtn").addEventListener("click", () => {
+    const ta = $("noteComposer");
+    const clean = ta.value.trim();
+    if (!clean) return;
+    const notes = v2Notes();
+    notes.push({ id: "n" + Date.now(), ts: new Date().toISOString(), text: clean, state: "open" });
+    ta.value = "";
+    saveNotesV2(notes);
+  });
+  function saveNoteEdit(id, text){
+    editingNoteId = null;
+    const clean = text.trim();
+    const notes = v2Notes();
+    const n = notes.find(x => x.id === id);
+    if (!n || n.state !== "open" || !clean || clean === n.text) { render(); return; }
+    n.text = clean;
+    saveNotesV2(notes);
+  }
+  function deleteNoteV2(id){
+    const notes = v2Notes();
+    const n = notes.find(x => x.id === id);
+    if (!n || n.state !== "open") return;
+    if (!confirm("Delete this note?")) return;
+    saveNotesV2(notes.filter(x => x.id !== id));
+  }
+
+  function renderV2(){
+    $("v1zone").classList.add("hidden");
+    $("v2zone").classList.remove("hidden");
+
+    const updated = state.meta?.lastUpdated ? new Date(state.meta.lastUpdated) : null;
+    if (updated && !isNaN(updated)) {
+      $("stamp").textContent = "Updated " + updated.toLocaleString("en-GB",
+        { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) +
+        (state.meta?.updatedBy ? " · " + state.meta.updatedBy : "");
+      const today = new Date(); today.setHours(0,0,0,0);
+      $("staleNotice").classList.toggle("hidden", !(updated < today));
+      if (updated < today) $("staleNotice").textContent =
+        "This is not today's board — last touched " +
+        updated.toLocaleDateString("en-GB",{ weekday:"long", day:"numeric", month:"long" }) + ".";
+    }
+
+    // take panel — v2 shape: take[] of {ts, text}
+    const takes = asArray(state.take).filter(t => t && t.text)
+      .sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
+    if (takes.length) {
+      $("takeTs").textContent = fmtDateTs(takes[0].ts);
+      $("takeText").textContent = takes[0].text;
+      const rest = takes.slice(1);
+      $("takeMoreBtn").classList.toggle("hidden", !rest.length);
+      if (rest.length) {
+        $("takeMoreBtn").textContent = showTakeHistory
+          ? "hide previous" : "previous takes (" + rest.length + ")";
+        $("takeHistory").classList.toggle("hidden", !showTakeHistory);
+        $("takeHistory").innerHTML = rest.map(t =>
+          '<p><span class="ts">' + esc(fmtDateTs(t.ts)) + '</span>' + esc(t.text) + '</p>').join("");
+      } else { $("takeHistory").classList.add("hidden"); }
+      $("takePanel").classList.remove("hidden");
+    } else { $("takePanel").classList.add("hidden"); }
+    $("takeMoreBtn").onclick = () => { showTakeHistory = !showTakeHistory; render(); };
+
+    // plan — Claude-authored list of action ids, ticks write to the action itself
+    $("planDateV2").textContent = state.plan?.date ? "· " + state.plan.date : "";
+    $("planList").innerHTML = asArray(state.plan?.actionIds).map(id => {
+      const f = findAction(id);
+      if (!f) return "";
+      return '<div class="pitem' + (f.a.done ? " done" : "") + '">' +
+        '<button class="tick" data-adone="' + esc(id) + '" aria-label="Toggle done">' + (f.a.done ? "✓" : "") + '</button>' +
+        '<div><div class="ptext">' + esc(f.a.text) + '</div>' +
+        '<div class="pproj">' + esc(f.p.title) + '</div></div></div>';
+    }).join("") || '<p class="msg" style="margin:0;text-align:left">No plan authored yet — run a compile.</p>';
+
+    // notes — open stickies (editable) above resolved (read-only, struck + resolution)
+    const notes = v2Notes();
+    $("notesV2").innerHTML =
+      notes.filter(n => n.state === "open").map(n => {
+        if (editingNoteId === n.id)
+          return '<div class="noteOpen"><textarea class="noteEditArea" data-noteedit="' + esc(n.id) + '">' + esc(n.text) + '</textarea></div>';
+        return '<div class="noteOpen">' + esc(n.text) +
+          '<div class="srow"><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' +
+          '<button class="sbtn" data-notetext="' + esc(n.id) + '">edit</button>' +
+          '<button class="sbtn" data-notedel="' + esc(n.id) + '">×</button></div></div>';
+      }).join("") +
+      notes.filter(n => n.state !== "open").map(n =>
+        '<div class="noteRes"><div class="orig">' + esc(n.text) + '</div>' +
+        '<div class="resol">↳ ' + esc(n.resolution?.text || "resolved") +
+        '<span class="ts">' + esc(fmtDateTs(n.resolution?.ts)) + '</span></div></div>').join("");
+
+    // board — projects in authored order; actions now → soon → later, done sink
+    $("board").innerHTML = asArray(state.projects).map(p => {
+      const acts = asArray(p.actions).slice().sort((a,b) =>
+        ((a.done ? 1 : 0) - (b.done ? 1 : 0)) ||
+        ((URG_ORDER[a.urgency] ?? 3) - (URG_ORDER[b.urgency] ?? 3)));
+      return '<div class="proj"><div class="proj-head"><h3>' + esc(p.title) + '</h3>' +
+        '<span class="pstate ' + esc(p.state || "") + '">' + esc(p.state || "") + '</span></div>' +
+        (p.summary ? '<div class="summary">' + esc(p.summary) + '</div>' : "") +
+        acts.map(a =>
+          '<div class="act' + (a.done ? " done" : "") + '">' +
+          '<button class="tick" data-adone="' + esc(a.id) + '" aria-label="Toggle done">' + (a.done ? "✓" : "") + '</button>' +
+          '<div class="atext"' + (a.provenance ? ' title="' + esc(asArray(a.provenance).join(" · ")) + '"' : "") + '>' + esc(a.text) + '</div>' +
+          '<div class="urg ' + esc(a.urgency || "") + '">' + esc(a.urgency || "") + '</div></div>').join("") +
+        '</div>';
+    }).join("");
+
+    // diffs — latest visible, history on tap
+    const diffs = asArray(state.diffs).sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
+    const dHtml = d => '<div><div class="dhead">' + esc(d.id) + ' · ' + esc(fmtDateTs(d.ts)) + '</div>' +
+      asArray(d.changes).map(c => '<div class="dwhat">' + esc(c.what) + '</div>' +
+        (c.why ? '<div class="dwhy">' + esc(c.why) + '</div>' : "")).join("") + '</div>';
+    if (diffs.length) {
+      $("diffLatest").innerHTML = dHtml(diffs[0]);
+      const rest = diffs.slice(1);
+      $("diffMoreBtn").classList.toggle("hidden", !rest.length);
+      if (rest.length) {
+        $("diffMoreBtn").textContent = showDiffHistory
+          ? "hide previous" : "previous changes (" + rest.length + ")";
+        $("diffHistory").classList.toggle("hidden", !showDiffHistory);
+        $("diffHistory").innerHTML = rest.map(dHtml).join("");
+      } else { $("diffHistory").classList.add("hidden"); }
+    } else { $("diffLatest").innerHTML = '<span class="dhead">No diffs yet.</span>'; }
+    $("diffMoreBtn").onclick = () => { showDiffHistory = !showDiffHistory; render(); };
+
+    wireV2();
+    show("app");
+    $("markBtn").classList.remove("hidden");
+  }
+
+  function wireV2(){
+    document.querySelectorAll("[data-adone]").forEach(b =>
+      b.onclick = () => toggleActionDone(b.dataset.adone));
+    document.querySelectorAll("[data-notetext]").forEach(b =>
+      b.onclick = () => { editingNoteId = b.dataset.notetext; render(); });
+    document.querySelectorAll("[data-notedel]").forEach(b =>
+      b.onclick = () => deleteNoteV2(b.dataset.notedel));
+    document.querySelectorAll("[data-noteedit]").forEach(ta => {
+      ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+      let done = false;
+      ta.onkeydown = e => { if (e.key === "Escape") { done = true; ta.onblur = null;
+        editingNoteId = null; render(); } };
+      ta.onblur = () => { if (done) return; done = true;
+        saveNoteEdit(ta.dataset.noteedit, ta.value); };
+    });
+  }
+
+  /* ---------- render ---------- */
+  function render(){
+    if (!state) { $("error").textContent = "The reference node is empty."; show("error"); return; }
+    if (state.projects) { renderV2(); return; }
+    $("v2zone").classList.add("hidden");
+    $("v1zone").classList.remove("hidden");
+
+    const updated = state.meta?.lastUpdated ? new Date(state.meta.lastUpdated) : null;
+    if (updated && !isNaN(updated)) {
+      $("stamp").textContent = "Compiled " + updated.toLocaleString("en-GB",
+        { weekday:"short", day:"numeric", month:"short", hour:"2-digit", minute:"2-digit" }) +
+        (state.meta?.lastReviewed && !isNaN(new Date(state.meta.lastReviewed))
+          ? " · Reviewed " + new Date(state.meta.lastReviewed).toLocaleTimeString("en-GB",
+              { hour:"2-digit", minute:"2-digit" }) : "");
+      const today = new Date(); today.setHours(0,0,0,0);
+      $("staleNotice").classList.toggle("hidden", !(updated < today));
+      if (updated < today) $("staleNotice").textContent =
+        "This is not today's plan — last compiled " +
+        updated.toLocaleDateString("en-GB",{ weekday:"long", day:"numeric", month:"long" }) + ".";
+    }
+
+    // take panel
+    const takes = asArray(state.claudesTake).filter(t => t && t.take)
+      .sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
+    if (takes.length) {
+      const latest = takes[0];
+      $("takeTs").textContent = fmtDateTs(latest.ts);
+      $("takeText").textContent = latest.take;
+      const rest = takes.slice(1);
+      $("takeMoreBtn").classList.toggle("hidden", !rest.length);
+      if (rest.length) {
+        $("takeMoreBtn").textContent = showTakeHistory
+          ? "hide previous" : "previous takes (" + rest.length + ")";
+        $("takeHistory").classList.toggle("hidden", !showTakeHistory);
+        $("takeHistory").innerHTML = rest.map(t =>
+          '<p><span class="ts">' + esc(fmtDateTs(t.ts)) + '</span>' + esc(t.take) + '</p>').join("");
+      } else { $("takeHistory").classList.add("hidden"); }
+      $("takePanel").classList.remove("hidden");
+    } else { $("takePanel").classList.add("hidden"); }
+    $("takeMoreBtn").onclick = () => { showTakeHistory = !showTakeHistory; render(); };
+
+    $("planDate").textContent = state.todaysPlan?.date ? "· " + esc(state.todaysPlan.date) : "";
+
+    // tasks with margin stacks
+    $("tasks").innerHTML = currentTasks().map(t => {
+      const th = entriesFor(t);
+      const open = expandedId === t.id;
+
+      let stackHtml = "";
+      if (th.length) {
+        const stickyHtml = (e, idx, withControls) => {
+          const mine = e.who === "richard";
+          if (withControls && editingEntry && editingEntry.taskId === t.id && editingEntry.idx === idx && mine)
+            return '<div class="sticky ' + (mine ? "s-mine" : "s-claude") + '">' +
+              '<input class="edit sticky-size" data-entryedit="' + esc(t.id) + ':' + idx + '" value="' + esc(e.text) + '"></div>';
+          const controls = withControls
+            ? '<div class="srow"><span class="ts">' + esc(fmtDateTs(e.ts)) + '</span>' +
+              (mine ? '<button class="sbtn" data-entrytext="' + esc(t.id) + ':' + idx + '">edit</button>' : "") +
+              '<button class="sbtn" data-entrydel="' + esc(t.id) + ':' + idx + '">×</button></div>'
+            : '<div class="srow"><span class="ts">' + esc(fmtTs(e.ts)) + '</span></div>';
+          return '<div class="sticky ' + (mine ? "s-mine" : "s-claude") + '">' + esc(e.text) + controls + '</div>';
+        };
+        if (open) {
+          stackHtml = '<div class="stack open" data-stack="' + esc(t.id) + '">' +
+            th.map((e, i) => stickyHtml(e, i, true)).join("") + '</div>';
+        } else {
+          const latest = th[th.length - 1];
+          const peeks = th.slice(-3, -1).reverse().map((e, i) =>
+            '<div class="peek ' + (e.who === "richard" ? "pg" : "py") + ' p' + (i + 1) + '"></div>').join("");
+          const count = th.length > 1 ? '<span class="count">' + th.length + '</span>' : "";
+          stackHtml = '<div class="stack" data-stack="' + esc(t.id) + '">' +
+            count + stickyHtml(latest, th.length - 1, false) + peeks + '</div>';
+        }
+      }
+      const replyHtml = replyingId === t.id
+        ? '<div class="reply-wrap"><input data-replyinput="' + esc(t.id) + '" placeholder="Reply… (Enter to stick)"></div>'
+        : '<button class="plusbtn" data-reply="' + esc(t.id) + '" aria-label="Reply with a green sticky">+</button>';
+      const marginHtml = '<div class="marginCell">' + stackHtml + replyHtml + '</div>';
+
+      const textHtml = editingId === t.id
+        ? '<input class="edit task-size" data-edit="' + esc(t.id) + '" value="' + esc(t.text) + '">'
+        : '<div class="task-text" data-text="' + esc(t.id) + '" title="Click to edit">' + esc(t.text) + '</div>';
+
+      return '<div class="task' + (t.done ? " done" : "") + '">' +
+        '<button class="tick" data-tick="' + esc(t.id) + '" aria-label="Toggle done">' + (t.done ? "✓" : "") + '</button>' +
+        '<div class="task-body">' + textHtml +
+        '<div class="task-actions">' +
+          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("task", t.text) + '">discuss</a>' +
+          '<button class="del" data-del="' + esc(t.id) + '">delete</button>' +
+        '</div></div>' + marginHtml + '</div>';
+    }).join("") || '<p class="msg">No tasks yet — add one below.</p>';
+
+    // fronts
+    $("fronts").innerHTML = asArray(state.fronts).map(f =>
+      '<div class="front"><h3>' + esc(f.title) + '</h3>' +
+      '<div class="status">' + esc(f.status) + '</div>' +
+      (f.liveEdge ? '<div class="edge">' + esc(f.liveEdge) + '</div>' : "") +
+      '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("front", f.title) + '">discuss</a>' +
+      '</div>').join("");
+
+    // ideas
+    $("ideasList").innerHTML = currentIdeas().map(i => {
+      const threadHtml = i.thread.length
+        ? '<div class="idea-thread">' + i.thread.map(e =>
+            '<div class="idea-entry ' + (e.who === "claude" ? "claude" : "") + '">' +
+            '<span class="who">' + (e.who === "claude" ? "Claude" : "You") + '</span>' +
+            '<span class="body">' + esc(e.text) + '</span>' +
+            '<span class="ts">' + esc(fmtDateTs(e.ts)) + '</span></div>').join("") + '</div>'
+        : "";
+      const thoughtInput = thoughtingId === i.id
+        ? '<input class="note-input" data-thoughtinput="' + esc(i.id) + '" placeholder="Your thought… (Enter to save)">'
+        : "";
+      return '<div class="idea"><div class="idea-head">' +
+        '<h3>' + esc(i.title) + '</h3>' +
+        '<button class="idea-state ' + esc(i.state || "thrashing") + '" data-state="' + esc(i.id) + '" title="Click to change state">' + esc(i.state || "thrashing") + '</button>' +
+        '</div>' + threadHtml + thoughtInput +
+        '<div class="idea-actions">' +
+          '<button class="plusbtn" data-thought="' + esc(i.id) + '" aria-label="Add a thought">+</button>' +
+          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("idea", i.title) + '">discuss</a>' +
+          '<button class="del" data-ideadel="' + esc(i.id) + '">delete</button>' +
+        '</div></div>';
+    }).join("") || '<p class="msg" style="margin:0 0 16px;text-align:left">No ideas in play — seed one below.</p>';
+
+    // free notes
+    $("richardsNotes").innerHTML = currentFreeNotes().map((n, i) => {
+      const isEditing = editingFreeNote === i;
+      const body = isEditing
+        ? '<input class="edit note-size" data-freenoteedit="' + i + '" value="' + esc(n.text) + '">'
+        : '<span class="note-text" data-freenotetext="' + i + '" title="Click to edit">' + esc(n.text) + '</span>' +
+          '<button class="note-del" data-freenotedel="' + i + '" aria-label="Delete note">×</button>';
+      return '<p><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' + body + '</p>';
+    }).join("");
+
+    wire();
+    show("app");
+    $("markBtn").classList.remove("hidden");
+  }
+
+  function wire(){
+    document.querySelectorAll("[data-tick]").forEach(b => b.onclick = () => toggleDone(b.dataset.tick));
+    document.querySelectorAll("[data-text]").forEach(el =>
+      el.onclick = () => { editingId = el.dataset.text; render(); });
+    document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteTask(b.dataset.del));
+    document.querySelectorAll("[data-reply]").forEach(b =>
+      b.onclick = () => { replyingId = b.dataset.reply; render(); });
+
+    document.querySelectorAll("[data-stack]").forEach(el =>
+      el.onclick = e => {
+        if (e.target.closest("button,input")) return;    // controls don't toggle
+        const id = el.dataset.stack;
+        expandedId = expandedId === id ? null : id;
+        editingEntry = null;
+        render();
+      });
+    document.querySelectorAll("[data-entrytext]").forEach(b =>
+      b.onclick = () => { const [tid, i] = b.dataset.entrytext.split(":");
+        editingEntry = { taskId: tid, idx: +i }; render(); });
+    document.querySelectorAll("[data-entrydel]").forEach(b =>
+      b.onclick = () => { const [tid, i] = b.dataset.entrydel.split(":"); deleteEntry(tid, +i); });
+
+    document.querySelectorAll("[data-state]").forEach(b => b.onclick = () => cycleState(b.dataset.state));
+    document.querySelectorAll("[data-ideadel]").forEach(b => b.onclick = () => deleteIdea(b.dataset.ideadel));
+    document.querySelectorAll("[data-thought]").forEach(b =>
+      b.onclick = () => { thoughtingId = b.dataset.thought; render(); });
+    document.querySelectorAll("[data-freenotetext]").forEach(el =>
+      el.onclick = () => { editingFreeNote = +el.dataset.freenotetext; render(); });
+    document.querySelectorAll("[data-freenotedel]").forEach(b =>
+      b.onclick = () => deleteFreeNote(+b.dataset.freenotedel));
+
+    // single-commit inputs (Enter and blur can otherwise both fire around a re-render)
+    function once(inp, save, cancel){
+      let done = false;
+      const commit = () => { if (done) return; done = true;
+        inp.onblur = null; inp.onkeydown = null; save(inp.value); };
+      inp.onkeydown = e => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { if (done) return; done = true;
+          inp.onblur = null; inp.onkeydown = null; cancel(); }
+      };
+      inp.onblur = commit;
+    }
+    document.querySelectorAll("[data-edit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      once(inp, v => saveText(inp.dataset.edit, v), () => { editingId = null; render(); });
+    });
+    document.querySelectorAll("[data-replyinput]").forEach(inp => {
+      inp.focus();
+      once(inp, v => addReply(inp.dataset.replyinput, v), () => { replyingId = null; render(); });
+    });
+    document.querySelectorAll("[data-entryedit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      const [tid, i] = inp.dataset.entryedit.split(":");
+      once(inp, v => saveEntryEdit(tid, +i, v), () => { editingEntry = null; render(); });
+    });
+    document.querySelectorAll("[data-thoughtinput]").forEach(inp => {
+      inp.focus();
+      once(inp, v => addThought(inp.dataset.thoughtinput, v), () => { thoughtingId = null; render(); });
+    });
+    document.querySelectorAll("[data-freenoteedit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      const i = +inp.dataset.freenoteedit;
+      once(inp, v => saveFreeNoteEdit(i, v), () => { editingFreeNote = null; render(); });
+    });
+  }
+
+  function discussUrl(kind, title){
+    const prompt = "Walk judgement focus — " + kind + ': "' + title + '". ' +
+      "Read the walk reference first, then give me focused judgement and advice on this specific " +
+      kind + ", and update its annotation in the reference.";
+    return "https://claude.ai/new?q=" + encodeURIComponent(prompt);
+  }
+
+  /* ---------- Mark It ---------- */
+  const REVIEW_URL = "https://morning-walks-419435526393.europe-west1.run.app/review/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
+  let toastTimer;
+  function toast(msg, ms){
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3500);
+  }
+  $("markBtn").addEventListener("click", async () => {
+    const btn = $("markBtn");
+    btn.disabled = true;
+    toast("Asking Claude to mark the board…", 8000);
+    try {
+      const r = await fetch(REVIEW_URL, { method: "POST" });
+      const text = await r.text();
+      if (r.ok) toast(text || "Marked — watch the margin.");
+      else throw new Error(text || ("HTTP " + r.status));
+    } catch (e) {
+      toast("Reviewer not live — opening a Claude chat instead.");
+      window.open("https://claude.ai/new?q=" + encodeURIComponent(
+        "Run a walk judgement: read the walk reference, judge the day's shape, reply into any stacks and idea threads where the last word was mine, and write it all back."),
+        "_blank", "noopener");
+    }
+    btn.disabled = false;
+  });
+
+  function fmtTs(ts){
+    if (!ts) return "";
+    const d = new Date(ts);
+    return isNaN(d) ? String(ts) : d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+  }
+  function fmtDateTs(ts){
+    if (!ts) return "";
+    const d = new Date(ts);
+    return isNaN(d) ? "" : d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+  }
+</script>
+</body>
+</html>
