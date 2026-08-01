@@ -1,9 +1,24 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v82.0 — 01/08/2026
+  v110.0 — 01/08/2026
 
   Changelog:
+  v110.0 — Widget palette (presentation licence, spec v110.0). Supersedes
+          v96.0; first release under the shared system version (VERSIONING.md
+          v104.0). Renders the eight agreed types — banner, callout,
+          checklist, flow, spotlight, countdown, progress, decision — from
+          walkReference/widgets[], anchored top-of-page or per project;
+          checklists with an actionId render beneath that action, spotlight
+          elevates its action inside the plan. Two interactive writes only:
+          checklist item done flags and decision answers (two-tap confirm;
+          answer double-writes props/answer + an inbox note carrying the
+          widget id — the note is the record the compile ingests). Countdown
+          self-refreshes every 30s, red-pen inside 48h. Unknown widget types
+          render nothing (forward-compatible). Empty widget set = zero
+          chrome. All house tokens, no new palette. Requires rules v110.0
+          for the two writes; renders read-only on v92. Also corrects the
+          header stamp, which still read v82.0 on the v96 content.
   v96.0 — Inbox-first (the PA front door): the note composer and open-note
           list move from beneath the plan to a green capture panel at the
           very top of the board — one indiscriminate inbox, phone-first,
@@ -354,6 +369,52 @@
   .autobar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
     margin:18px 0 6px;padding:12px 16px;background:var(--stickyY);border-radius:2px;
     box-shadow:0 3px 8px rgba(33,37,43,0.16);transform:rotate(-0.4deg)}
+
+  /* widgets — compile-authored furniture (spec v110) */
+  .wban{margin:14px 0 4px;padding:12px 16px;border-radius:2px;font-size:0.98rem;line-height:1.45}
+  .wban.urgent{background:var(--amber-bg);color:var(--redpen);font-weight:500;
+    box-shadow:0 2px 6px rgba(33,37,43,0.14)}
+  .wban.info{background:var(--white);color:var(--biro);border:1px solid var(--hairline)}
+  .wprov{font-family:'IBM Plex Mono',monospace;font-size:0.58rem;letter-spacing:0.05em;
+    text-transform:uppercase;color:var(--faint);margin-top:5px}
+  .wcall{background:var(--stickyY);color:var(--ink);font-family:'Kalam',cursive;border-radius:2px;
+    box-shadow:0 2px 6px rgba(33,37,43,0.16);padding:9px 12px 7px;margin:8px 0;
+    font-size:0.95rem;line-height:1.4;transform:rotate(0.35deg)}
+  .wcall.warn{background:var(--amber-bg);color:var(--amber)}
+  .wchk{margin:8px 0 4px}
+  .wchk h4{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--faint);
+    font-weight:600;margin:0 0 4px}
+  .wchk h4 b{color:var(--moss);text-transform:none;letter-spacing:0;margin-left:4px}
+  .witem{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;align-items:start;padding:3px 0}
+  .witem .tick{width:16px;height:16px;margin-top:2px;font-size:0.6rem;border-width:1.5px}
+  .witem.done span{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
+  .witem span{font-size:0.9rem}
+  .wflow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 4px}
+  .wflow .fstep{border:1px solid var(--hairline);background:var(--white);border-radius:2px;
+    padding:6px 10px;font-size:0.85rem}
+  .wflow .fstep b{font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--faint);
+    font-weight:400;margin-right:6px}
+  .wflow .farr{color:var(--faint)}
+  .wcd{display:flex;align-items:baseline;gap:10px;margin:10px 0 4px;flex-wrap:wrap}
+  .wcd .cdnum{font-family:'IBM Plex Mono',monospace;font-size:1.25rem;color:var(--ink)}
+  .wcd.close .cdnum{color:var(--redpen)}
+  .wcd .cdlab{font-size:0.9rem;color:var(--faint)}
+  .wprog{margin:10px 0 4px;max-width:420px}
+  .wprog .plab{display:flex;justify-content:space-between;gap:10px;font-size:0.85rem;
+    color:var(--faint);margin-bottom:4px}
+  .wprog .ptrack{height:6px;background:var(--hairline);border-radius:3px;overflow:hidden}
+  .wprog .pfill{height:100%;background:var(--moss)}
+  .wdec{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
+    padding:12px 14px;margin:10px 0 4px}
+  .wdec .dq{font-size:0.98rem;margin-bottom:8px}
+  .wdec .dopts{display:flex;flex-wrap:wrap;gap:8px}
+  .wdec .dopt{border:1.5px solid var(--biro);color:var(--biro);background:none;border-radius:2px;
+    padding:6px 12px;font-size:0.9rem;cursor:pointer}
+  .wdec .dopt.lean::after{content:" · Claude leans";font-size:0.65rem;color:var(--faint)}
+  .wdec .dopt.armed{background:var(--biro);color:var(--white)}
+  .wdec .dans{font-size:0.95rem;color:var(--moss);font-weight:500}
+  .wspot{background:var(--amber-bg);border-radius:2px;padding:2px 10px;margin:0 -10px}
+  .wspot .why{font-size:0.8rem;color:var(--amber);margin:-5px 0 9px 36px}
   .autobar .cdlabel{font-family:'Caveat',cursive;font-weight:600;font-size:1.25rem;color:var(--redpen)}
   .autobar b{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:0.95rem;color:var(--ink)}
   .autobar button{font:inherit;font-weight:500;cursor:pointer;background:var(--redpen);
@@ -458,6 +519,7 @@
   </div><!-- /v1zone -->
 
   <div id="v2zone" class="hidden">
+    <div id="wTop"></div>
     <div class="inbox">
       <h2>Inbox</h2>
       <div class="composer">
@@ -537,6 +599,7 @@
   let editingFreeNote = null;
   let thoughtingId = null;
   let showTakeHistory = false;
+  let armedDecision = null;    // "widgetIndex:option" awaiting confirm tap
 
   const IDEA_STATES = ["thrashing", "parked", "graduated"];
 
@@ -799,6 +862,142 @@
     saveNotesV2(notes.filter(x => x.id !== id));
   }
 
+  /* ---------- widgets (presentation licence, spec v110) ---------- */
+  function widgetsArr(){ return asArray(state?.widgets); }
+  function spotlightFor(actionId){
+    return widgetsArr().find(w => w && w.type === "spotlight" && w.props?.actionId === actionId);
+  }
+  function checklistsFor(actionId){
+    const out = [];
+    widgetsArr().forEach((w, wi) => {
+      if (w && w.type === "checklist" && w.props?.actionId === actionId) out.push(chkHtml(w, wi)); });
+    return out.join("");
+  }
+  function chkHtml(w, wi){
+    const items = asArray(w.props?.items);
+    const done = items.filter(i => i && i.done).length;
+    return '<div class="wchk"><h4>' + esc(w.props?.title || "Checklist") +
+      '<b>' + done + "/" + items.length + '</b></h4>' +
+      items.map((it, ii) => '<div class="witem' + (it && it.done ? " done" : "") + '">' +
+        '<button class="tick" data-wcheck="' + wi + ":" + ii + '" aria-label="Toggle item">' +
+        (it && it.done ? "✓" : "") + '</button>' +
+        '<span>' + esc(it && it.text) + '</span></div>').join("") + '</div>';
+  }
+  function cdParts(deadline){
+    const ms = new Date(deadline) - Date.now();
+    if (isNaN(ms)) return null;
+    if (ms <= 0) return { txt: "passed", close: true };
+    const d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000);
+    return { txt: d ? d + "d " + h + "h" : h + "h " + Math.floor(ms % 3600000 / 60000) + "m",
+      close: ms < 48 * 3600000 };
+  }
+  function widgetHtml(w, wi){
+    if (!w || !w.type) return "";
+    const prov = w.provenance
+      ? '<div class="wprov">' + esc(asArray(w.provenance).join(" · ")) + '</div>' : "";
+    switch (w.type) {
+      case "banner":
+        return '<div class="wban ' + (w.props?.tone === "urgent" ? "urgent" : "info") + '">' +
+          esc(w.props?.text) + prov + '</div>';
+      case "callout":
+        return '<div class="wcall' + (w.props?.tone === "warn" ? " warn" : "") + '">' +
+          esc(w.props?.text) + '</div>';
+      case "checklist":
+        return w.props?.actionId ? "" : chkHtml(w, wi);  // action-anchored: rendered under the action
+      case "flow": {
+        const steps = asArray(w.props?.steps);
+        return '<div class="wchk">' +
+          (w.props?.title ? '<h4>' + esc(w.props.title) + '</h4>' : "") +
+          '<div class="wflow">' + steps.map((s, i) =>
+            '<span class="fstep"><b>' + (i + 1) + '</b>' + esc(s) + '</span>')
+            .join('<span class="farr">→</span>') + '</div>' + prov + '</div>';
+      }
+      case "countdown": {
+        const p = cdParts(w.props?.deadline);
+        if (!p) return "";
+        return '<div class="wcd' + (p.close ? " close" : "") + '" data-cddl="' +
+          esc(w.props?.deadline) + '">' +
+          '<span class="cdnum">' + esc(p.txt) + '</span>' +
+          '<span class="cdlab">' + esc(w.props?.label) + '</span>' + prov + '</div>';
+      }
+      case "progress": {
+        const done = +(w.props?.done) || 0, total = +(w.props?.total) || 0;
+        const pct = total ? Math.min(100, Math.round(done / total * 100)) : 0;
+        return '<div class="wprog"><div class="plab"><span>' + esc(w.props?.label) + '</span>' +
+          '<span>' + done + "/" + total + '</span></div>' +
+          '<div class="ptrack"><div class="pfill" style="width:' + pct + '%"></div></div></div>';
+      }
+      case "decision": {
+        if (w.props?.answer)
+          return '<div class="wdec"><div class="dq">' + esc(w.props?.question) + '</div>' +
+            '<div class="dans">✓ ' + esc(w.props.answer) + '</div>' + prov + '</div>';
+        return '<div class="wdec"><div class="dq">' + esc(w.props?.question) + '</div>' +
+          '<div class="dopts">' + asArray(w.props?.options).map(o =>
+            '<button class="dopt' + (o === w.props?.leaning ? " lean" : "") +
+            (armedDecision === wi + ":" + o ? " armed" : "") +
+            '" data-wanswer="' + wi + '" data-opt="' + esc(o) + '">' +
+            esc(armedDecision === wi + ":" + o ? "confirm: " + o : o) +
+            '</button>').join("") + '</div>' + prov + '</div>';
+      }
+      case "spotlight": return "";  // consumed by the plan render
+      default: return "";           // unknown type — forward-compatible, render nothing
+    }
+  }
+  function renderTopWidgets(){
+    const el = $("wTop"); if (!el) return;
+    const ws = [];
+    widgetsArr().forEach((w, wi) => {
+      if (w && (w.anchor === "top" || !w.anchor) && w.type !== "spotlight" &&
+          !(w.type === "checklist" && w.props?.actionId)) ws.push({ w, wi }); });
+    ws.sort((a, b) => (a.w.type === "banner" ? 0 : 1) - (b.w.type === "banner" ? 0 : 1));
+    el.innerHTML = ws.map(x => widgetHtml(x.w, x.wi)).join("");
+  }
+  function projWidgetsHtml(pid){
+    const out = [];
+    widgetsArr().forEach((w, wi) => {
+      if (w && w.anchor === pid && w.type !== "spotlight" &&
+          !(w.type === "checklist" && w.props?.actionId)) out.push(widgetHtml(w, wi)); });
+    return out.join("");
+  }
+  function toggleWidgetItem(key){
+    const [wi, ii] = key.split(":").map(Number);
+    const w = widgetsArr()[wi]; const it = asArray(w?.props?.items)[ii];
+    if (!it) return;
+    flashSaving();
+    firebase.database().ref("walkReference/widgets/" + wi + "/props/items/" + ii + "/done")
+      .set(!it.done).then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  function answerDecision(wi, opt){
+    const key = wi + ":" + opt;
+    if (armedDecision !== key) { armedDecision = key; render(); return; }
+    armedDecision = null;
+    const w = widgetsArr()[wi]; if (!w) return;
+    flashSaving();
+    firebase.database().ref("walkReference/widgets/" + wi + "/props/answer").set(opt)
+      .then(() => {
+        const notes = v2Notes();
+        notes.push({ id: "n" + Date.now(), ts: new Date().toISOString(),
+          text: "Decision " + (w.id || "w" + wi) + " — " + (w.props?.question || "") + ": " + opt,
+          state: "open" });
+        return firebase.database().ref("walkReference/notes").set(notes);
+      })
+      .then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  let cdRefresh = null;
+  function startCountdowns(){
+    clearInterval(cdRefresh);
+    if (!document.querySelector("[data-cddl]")) return;
+    cdRefresh = setInterval(() => {
+      document.querySelectorAll("[data-cddl]").forEach(el => {
+        const p = cdParts(el.dataset.cddl); if (!p) return;
+        el.classList.toggle("close", p.close);
+        const n = el.querySelector(".cdnum"); if (n) n.textContent = p.txt;
+      });
+    }, 30000);
+  }
+
   function renderV2(){
     $("v1zone").classList.add("hidden");
     $("v2zone").classList.remove("hidden");
@@ -835,15 +1034,21 @@
     } else { $("takePanel").classList.add("hidden"); }
     $("takeMoreBtn").onclick = () => { showTakeHistory = !showTakeHistory; render(); };
 
+    renderTopWidgets();
+
     // plan — Claude-authored list of action ids, ticks write to the action itself
     $("planDateV2").textContent = state.plan?.date ? "· " + state.plan.date : "";
     $("planList").innerHTML = asArray(state.plan?.actionIds).map(id => {
       const f = findAction(id);
       if (!f) return "";
-      return '<div class="pitem' + (f.a.done ? " done" : "") + '">' +
+      const core = '<div class="pitem' + (f.a.done ? " done" : "") + '">' +
         '<button class="tick" data-adone="' + esc(id) + '" aria-label="Toggle done">' + (f.a.done ? "✓" : "") + '</button>' +
         '<div><div class="ptext">' + esc(f.a.text) + '</div>' +
         '<div class="pproj">' + esc(f.p.title) + '</div></div></div>';
+      const sp = spotlightFor(id);
+      return sp ? '<div class="wspot">' + core +
+        (sp.props?.reason ? '<div class="why">' + esc(sp.props.reason) + '</div>' : "") +
+        '</div>' : core;
     }).join("") || '<p class="msg" style="margin:0;text-align:left">No plan authored yet — run a compile.</p>';
 
     // notes — open stickies (editable) above resolved (read-only, struck + resolution)
@@ -870,11 +1075,13 @@
       return '<div class="proj"><div class="proj-head"><h3>' + esc(p.title) + '</h3>' +
         '<span class="pstate ' + esc(p.state || "") + '">' + esc(p.state || "") + '</span></div>' +
         (p.summary ? '<div class="summary">' + esc(p.summary) + '</div>' : "") +
+        projWidgetsHtml(p.id) +
         acts.map(a =>
           '<div class="act' + (a.done ? " done" : "") + '">' +
           '<button class="tick" data-adone="' + esc(a.id) + '" aria-label="Toggle done">' + (a.done ? "✓" : "") + '</button>' +
           '<div class="atext"' + (a.provenance ? ' title="' + esc(asArray(a.provenance).join(" · ")) + '"' : "") + '>' + esc(a.text) + '</div>' +
-          '<div class="urg ' + esc(a.urgency || "") + '">' + esc(a.urgency || "") + '</div></div>').join("") +
+          '<div class="urg ' + esc(a.urgency || "") + '">' + esc(a.urgency || "") + '</div></div>' +
+          checklistsFor(a.id)).join("") +
         '</div>';
     }).join("");
 
@@ -897,12 +1104,17 @@
     $("diffMoreBtn").onclick = () => { showDiffHistory = !showDiffHistory; render(); };
 
     wireV2();
+    startCountdowns();
     show("app");
   }
 
   function wireV2(){
     document.querySelectorAll("[data-adone]").forEach(b =>
       b.onclick = () => toggleActionDone(b.dataset.adone));
+    document.querySelectorAll("[data-wcheck]").forEach(b =>
+      b.onclick = () => toggleWidgetItem(b.dataset.wcheck));
+    document.querySelectorAll("[data-wanswer]").forEach(b =>
+      b.onclick = () => answerDecision(+b.dataset.wanswer, b.dataset.opt));
     document.querySelectorAll("[data-notetext]").forEach(b =>
       b.onclick = () => { editingNoteId = b.dataset.notetext; render(); });
     document.querySelectorAll("[data-notedel]").forEach(b =>
