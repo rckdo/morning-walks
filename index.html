@@ -4,6 +4,10 @@
   v58.0 — 31/07/2026
 
   Changelog:
+  v70.0 — Red pen: all Claude-voiced content (task margin marks, idea-thread
+          replies, the headline take) restyled in a handwriting face (Caveat)
+          in marking-red ink, sized up for legibility. Richard's content keeps
+          the typeset faces — two voices, visibly two hands.
   v69.0 — BUGFIX: single-commit inputs. Enter + blur could both fire the same
           save around a re-render, duplicating notes/thoughts instead of
           editing; every input commit is now guarded to run exactly once
@@ -43,12 +47,12 @@
 <title>Morning Walk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
     --paper:#F3F5F7; --ink:#21252B; --faint:#5C6470; --hairline:#D6DBE0;
     --amber:#A8620D; --amber-bg:#F6E8D4; --moss:#3F6B3F; --white:#FFFFFF;
-    --danger:#8C2F2F;
+    --danger:#8C2F2F; --redpen:#BE342C;
   }
   *{box-sizing:border-box;margin:0;padding:0}
   html{font-size:16px}
@@ -71,7 +75,8 @@
   .take-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;margin-bottom:6px}
   .take-label{font-size:0.78rem;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:var(--faint)}
   .take-head .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--faint)}
-  .take-text{font-size:0.97rem}
+  .take-text{font-family:'Caveat',cursive;font-weight:500;font-size:1.35rem;
+    line-height:1.35;color:var(--redpen)}
   .take-more{font:inherit;font-size:0.8rem;color:var(--faint);background:none;border:none;
     cursor:pointer;padding:0;margin-top:8px}
   .take-more:hover{color:var(--ink)}
@@ -109,9 +114,10 @@
   .task-notes li:hover .note-del,.footer-notes p:hover .note-del{visibility:visible}
   @media (hover:none){.note-del{visibility:visible}}
   .note-del:hover{color:var(--danger)}
-  .cnote{margin-top:5px;font-size:0.88rem;color:var(--amber);display:flex;align-items:baseline}
-  .cnote .cl{font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;
-    margin-right:8px;flex:none}
+  .cnote{margin-top:5px;font-family:'Caveat',cursive;font-weight:500;font-size:1.2rem;
+    line-height:1.3;color:var(--redpen);display:flex;align-items:baseline}
+  .cnote .cl{font-family:'IBM Plex Sans',sans-serif;font-size:0.7rem;font-weight:600;
+    text-transform:uppercase;letter-spacing:0.06em;margin-right:8px;flex:none;color:var(--redpen)}
   .cnote .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;margin-left:8px;
     color:var(--faint);flex:none}
   /* ideas */
@@ -129,8 +135,9 @@
   .idea-entry{display:flex;align-items:baseline;padding:4px 0;font-size:0.93rem;gap:0}
   .idea-entry .who{font-size:0.7rem;font-weight:600;text-transform:uppercase;
     letter-spacing:0.06em;margin-right:10px;flex:none;width:52px;color:var(--faint)}
-  .idea-entry.claude{color:var(--amber)}
-  .idea-entry.claude .who{color:var(--amber)}
+  .idea-entry.claude{font-family:'Caveat',cursive;font-weight:500;font-size:1.2rem;
+    line-height:1.3;color:var(--redpen)}
+  .idea-entry.claude .who{font-family:'IBM Plex Sans',sans-serif;color:var(--redpen)}
   .idea-entry .ts{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;
     color:var(--faint);margin-left:10px;flex:none}
   .idea-entry span.body{flex:1;min-width:0}
