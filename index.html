@@ -1,9 +1,40 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v111.0 — 01/08/2026
+  v113.0 — 01/08/2026
 
   Changelog:
+  v113.0 — The PA set. Supersedes v112.0. Seven types join the desk:
+          meeting (clipped agenda sheet — when, circled initials, numbered
+          points, tickable prep; prep lives at props.items so the existing
+          rules write path covers it, no rules change), chase (out-tray of
+          sent-and-awaiting slips, elapsed days computed at render, red-pen
+          underline past a week), talking (per-person index divider of
+          queued points), outwork (carbon-copy delegation chits with an
+          OUT WITH stamp), fromfiles (aged dog-eared archive card, FILE
+          stamp — authored only from the board's own history), spike
+          (parked-on-purpose papers impaled on a drawn spike, max three
+          shown), horizon (the longer-term line standing on a bracketed
+          shelf). Gallery grown to fifteen. No server change (v94 stands)
+          and no rules change (v110 stands).
+  v112.0 — The desk set. Supersedes v111.0. Palette consolidated and made
+          bold on the desk-object principle: every widget is a recognisable
+          desk artefact, none mistakable for another, and the red pen is
+          the connecting signature. notice (merges banner/callout/spotlight
+          — urgent carries a rubber stamp; attached form lifts a plan line
+          with a margin note), checklist (torn notebook strip: ruled lines,
+          red margin, punched holes, hand ticks and red strike-through),
+          flow (real diagram — numbered index cards joined by drawn SVG
+          arrows), countdown (flip-card day counter in Fraunces), progress
+          (ruler with pencil-hatch shading and a written fraction),
+          decision (torn paper slips; the chosen one gets the red-pen
+          circle), calendar (new — page-a-month grid, board-evidenced marks
+          only, today circled in red), tally (new — hand tally marks, fifth
+          stroke in red). Legacy types banner/callout/spotlight still
+          render via aliases, so older boards never break. Ruled lines,
+          ruler ticks and hatching are representational artefacts, a
+          deliberate exception to the anti-slop stripes rule. Gallery and
+          descriptions rewritten to match.
   v111.0 — Plain-sight pass. Supersedes v110.0. (1) Claude's take now
           collapses to its first sentence by default with an expand/collapse
           toggle (preference kept in localStorage, safe-guarded for private
@@ -381,51 +412,214 @@
     margin:18px 0 6px;padding:12px 16px;background:var(--stickyY);border-radius:2px;
     box-shadow:0 3px 8px rgba(33,37,43,0.16);transform:rotate(-0.4deg)}
 
-  /* widgets — compile-authored furniture (spec v110) */
-  .wban{margin:14px 0 4px;padding:12px 16px;border-radius:2px;font-size:0.98rem;line-height:1.45}
-  .wban.urgent{background:var(--amber-bg);color:var(--redpen);font-weight:500;
-    box-shadow:0 2px 6px rgba(33,37,43,0.14)}
-  .wban.info{background:var(--white);color:var(--biro);border:1px solid var(--hairline)}
+  /* widgets — the desk set (v112): each widget a distinct desk object; the red pen is the signature.
+     Ruled lines, ruler ticks and pencil hatching below are representational (the artefact itself),
+     not surface decoration — deliberate exceptions to the no-stripes rule. */
+  .wnotice{position:relative;margin:14px 0 6px;padding:12px 16px 11px;background:var(--white);
+    border:1px solid var(--hairline);border-radius:2px;font-size:0.98rem;line-height:1.45;
+    transform:rotate(-0.3deg)}
+  .wnotice.urgent{background:var(--amber-bg);border-color:transparent;color:var(--ink);
+    box-shadow:0 3px 8px rgba(33,37,43,0.18)}
+  .stamp{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:0.62rem;font-weight:500;
+    letter-spacing:0.18em;color:var(--redpen);border:2px solid var(--redpen);border-radius:2px;
+    padding:2px 7px 1px;margin:0 10px 2px 0;transform:rotate(-4deg);vertical-align:middle;opacity:0.85}
+  .wnotice.note{background:var(--stickyY);border-color:transparent;font-family:'Kalam',cursive;
+    box-shadow:0 2px 6px rgba(33,37,43,0.16);transform:rotate(0.4deg)}
+  .wnotice.warn{background:var(--amber-bg);border-color:transparent;font-family:'Kalam',cursive;
+    color:var(--amber);box-shadow:0 2px 6px rgba(33,37,43,0.16)}
   .wprov{font-family:'IBM Plex Mono',monospace;font-size:0.58rem;letter-spacing:0.05em;
-    text-transform:uppercase;color:var(--faint);margin-top:5px}
-  .wcall{background:var(--stickyY);color:var(--ink);font-family:'Kalam',cursive;border-radius:2px;
-    box-shadow:0 2px 6px rgba(33,37,43,0.16);padding:9px 12px 7px;margin:8px 0;
-    font-size:0.95rem;line-height:1.4;transform:rotate(0.35deg)}
-  .wcall.warn{background:var(--amber-bg);color:var(--amber)}
-  .wchk{margin:8px 0 4px}
-  .wchk h4{font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--faint);
-    font-weight:600;margin:0 0 4px}
-  .wchk h4 b{color:var(--moss);text-transform:none;letter-spacing:0;margin-left:4px}
-  .witem{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;align-items:start;padding:3px 0}
-  .witem .tick{width:16px;height:16px;margin-top:2px;font-size:0.6rem;border-width:1.5px}
-  .witem.done span{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
-  .witem span{font-size:0.9rem}
-  .wflow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0 4px}
-  .wflow .fstep{border:1px solid var(--hairline);background:var(--white);border-radius:2px;
-    padding:6px 10px;font-size:0.85rem}
-  .wflow .fstep b{font-family:'IBM Plex Mono',monospace;font-size:0.65rem;color:var(--faint);
-    font-weight:400;margin-right:6px}
-  .wflow .farr{color:var(--faint)}
-  .wcd{display:flex;align-items:baseline;gap:10px;margin:10px 0 4px;flex-wrap:wrap}
-  .wcd .cdnum{font-family:'IBM Plex Mono',monospace;font-size:1.25rem;color:var(--ink)}
-  .wcd.close .cdnum{color:var(--redpen)}
-  .wcd .cdlab{font-size:0.9rem;color:var(--faint)}
-  .wprog{margin:10px 0 4px;max-width:420px}
-  .wprog .plab{display:flex;justify-content:space-between;gap:10px;font-size:0.85rem;
-    color:var(--faint);margin-bottom:4px}
-  .wprog .ptrack{height:6px;background:var(--hairline);border-radius:3px;overflow:hidden}
-  .wprog .pfill{height:100%;background:var(--moss)}
-  .wdec{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
-    padding:12px 14px;margin:10px 0 4px}
-  .wdec .dq{font-size:0.98rem;margin-bottom:8px}
-  .wdec .dopts{display:flex;flex-wrap:wrap;gap:8px}
-  .wdec .dopt{border:1.5px solid var(--biro);color:var(--biro);background:none;border-radius:2px;
-    padding:6px 12px;font-size:0.9rem;cursor:pointer}
-  .wdec .dopt.lean::after{content:" · Claude leans";font-size:0.65rem;color:var(--faint)}
-  .wdec .dopt.armed{background:var(--biro);color:var(--white)}
-  .wdec .dans{font-size:0.95rem;color:var(--moss);font-weight:500}
+    text-transform:uppercase;color:var(--faint);margin-top:6px}
+  .wchk{position:relative;margin:10px 0 6px;background:var(--white);border-radius:2px;
+    box-shadow:0 2px 6px rgba(33,37,43,0.14);padding:8px 14px 10px 46px;
+    background-image:linear-gradient(var(--redpen) 0 0),
+      repeating-linear-gradient(to bottom, transparent 0 25px, #E7ECF0 25px 26px);
+    background-size:1px 100%,100% 26px;background-position:36px 0,0 6px;
+    background-repeat:no-repeat,repeat}
+  .wchk::before,.wchk::after{content:"";position:absolute;left:12px;width:11px;height:11px;
+    border-radius:50%;background:var(--paper);box-shadow:inset 0 1px 2px rgba(33,37,43,0.35)}
+  .wchk::before{top:18px}.wchk::after{bottom:18px}
+  .wchk h4{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;text-transform:uppercase;
+    letter-spacing:0.08em;color:var(--faint);font-weight:500;line-height:26px;margin:0}
+  .wchk h4 b{font-family:'Caveat',cursive;font-size:1.05rem;color:var(--moss);
+    text-transform:none;letter-spacing:0;margin-left:8px}
+  .witem{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:baseline;
+    line-height:26px}
+  .witem .tick{width:16px;height:16px;border:1.5px solid var(--faint);border-radius:2px;
+    background:none;cursor:pointer;font-family:'Caveat',cursive;font-size:1.15rem;line-height:1;
+    color:var(--redpen);padding:0;position:relative;top:2px}
+  .witem.done .tick{border-color:transparent}
+  .witem span{font-size:0.92rem}
+  .witem.done span{color:var(--faint);text-decoration:line-through;
+    text-decoration-color:var(--redpen);text-decoration-thickness:1.5px}
+  .wflow{margin:12px 0 6px}
+  .wflow .ft{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;text-transform:uppercase;
+    letter-spacing:0.08em;color:var(--faint);margin-bottom:8px}
+  .fnode{position:relative;display:flex;gap:10px;align-items:baseline;background:var(--white);
+    border:1px solid var(--hairline);border-radius:2px;box-shadow:0 2px 5px rgba(33,37,43,0.12);
+    padding:9px 12px;max-width:420px;font-size:0.92rem}
+  .fnode b{flex:none;width:20px;height:20px;border:1.5px solid var(--ink);border-radius:50%;
+    font-family:'IBM Plex Mono',monospace;font-size:0.68rem;font-weight:500;display:flex;
+    align-items:center;justify-content:center;position:relative;top:3px}
+  .fnode:nth-child(odd){transform:rotate(-0.35deg)}
+  .fnode:nth-child(even){transform:rotate(0.3deg);margin-left:26px}
+  .farrow{width:34px;height:26px;margin:1px 0 1px 40px;display:block}
+  .farrow path{stroke:var(--ink);stroke-width:1.6;fill:none;stroke-linecap:round}
+  .farrow polygon{fill:var(--ink)}
+  .wcd{display:flex;align-items:center;gap:14px;margin:12px 0 6px}
+  .flip{position:relative;min-width:96px;padding:10px 14px 12px;background:var(--white);
+    border-radius:4px;box-shadow:0 3px 8px rgba(33,37,43,0.22);text-align:center}
+  .flip::before{content:"";position:absolute;left:0;right:0;top:50%;height:1px;background:var(--hairline)}
+  .flip .n{font-family:'Fraunces',serif;font-weight:600;font-size:2.6rem;line-height:1;
+    color:var(--ink);letter-spacing:-0.02em}
+  .wcd.close .flip .n{color:var(--redpen)}
+  .flip .u{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;letter-spacing:0.14em;
+    text-transform:uppercase;color:var(--faint);margin-top:3px}
+  .wcd .cdlab{font-family:'Caveat',cursive;font-size:1.25rem;color:var(--ink);max-width:200px;line-height:1.2}
+  .wprog{margin:12px 0 6px;max-width:420px}
+  .wprog .plab{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;text-transform:uppercase;
+    letter-spacing:0.08em;color:var(--faint);margin-bottom:5px}
+  .ruler{position:relative;height:22px;background:var(--white);border:1px solid var(--hairline);
+    border-radius:2px;overflow:hidden}
+  .ruler .ticks{position:absolute;inset:0;
+    background:repeating-linear-gradient(to right, transparent 0 34px, var(--hairline) 34px 35px),
+      repeating-linear-gradient(to right, transparent 0 6px, #EDF1F4 6px 7px);
+    background-size:100% 100%,100% 55%;background-position:0 0,0 100%;background-repeat:repeat}
+  .ruler .shade{position:absolute;top:0;bottom:0;left:0;
+    background:repeating-linear-gradient(45deg, rgba(63,107,63,0.55) 0 2px, transparent 2px 5px)}
+  .wprog .pfrac{font-family:'Caveat',cursive;font-size:1.3rem;color:var(--ink);margin-top:3px}
+  .wdec{margin:12px 0 6px}
+  .wdec .dq{font-family:'Kalam',cursive;font-size:1rem;margin-bottom:9px}
+  .dopts{display:flex;flex-wrap:wrap;gap:12px}
+  .dopt{position:relative;background:var(--white);border:1px solid var(--hairline);border-radius:2px;
+    box-shadow:0 2px 5px rgba(33,37,43,0.14);padding:8px 16px;font-size:0.95rem;cursor:pointer;
+    clip-path:polygon(0 12%,6% 0,55% 4%,100% 0,100% 100%,0 100%)}
+  .dopt:nth-child(even){transform:rotate(0.6deg)}
+  .dopt:nth-child(odd){transform:rotate(-0.5deg)}
+  .dopt .lean{font-family:'Caveat',cursive;font-size:0.95rem;color:var(--faint);margin-left:7px}
+  .dopt.armed{transform:rotate(0) translateY(-2px);box-shadow:0 5px 11px rgba(33,37,43,0.22);
+    border-color:var(--redpen);color:var(--redpen)}
+  .dans{position:relative;display:inline-block;padding:8px 20px;font-size:0.98rem}
+  .dans svg{position:absolute;inset:-7px -10px;width:calc(100% + 20px);height:calc(100% + 14px);
+    pointer-events:none}
+  .dans ellipse{fill:none;stroke:var(--redpen);stroke-width:2.2}
+  .wcal{margin:12px 0 6px;max-width:330px;background:var(--white);border-radius:2px;
+    box-shadow:0 3px 8px rgba(33,37,43,0.16);padding:12px 14px 10px}
+  .wcal .cmon{font-family:'Caveat',cursive;font-size:1.45rem;color:var(--ink);margin-bottom:6px}
+  .cgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--hairline);
+    border:1px solid var(--hairline)}
+  .cgrid .ch{background:var(--paper);font-family:'IBM Plex Mono',monospace;font-size:0.52rem;
+    letter-spacing:0.08em;text-transform:uppercase;color:var(--faint);text-align:center;padding:3px 0}
+  .cgrid .cd{position:relative;background:var(--white);min-height:30px;
+    font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--ink);padding:2px 0 0 4px}
+  .cgrid .cd.out{background:var(--paper);color:var(--hairline)}
+  .cgrid .cd.mark::after{content:"";position:absolute;left:4px;bottom:4px;width:5px;height:5px;
+    border-radius:50%;background:var(--biro)}
+  .cgrid .cd.today svg{position:absolute;inset:-2px;width:calc(100% + 4px);height:calc(100% + 4px);
+    pointer-events:none}
+  .cgrid .cd.today ellipse{fill:none;stroke:var(--redpen);stroke-width:1.8}
+  .wcal .clegend{font-size:0.8rem;color:var(--faint);margin-top:7px;line-height:1.5}
+  .wcal .clegend b{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:0.66rem;
+    color:var(--biro);margin-right:5px}
+  .wtally{display:flex;align-items:center;gap:12px;margin:12px 0 6px;flex-wrap:wrap}
+  .wtally svg{height:30px}
+  .wtally svg line{stroke:var(--ink);stroke-width:2.4;stroke-linecap:round}
+  .wtally svg line.g{stroke:var(--redpen)}
+  .wtally .tlab{font-family:'Caveat',cursive;font-size:1.25rem;color:var(--ink)}
   .wspot{background:var(--amber-bg);border-radius:2px;padding:2px 10px;margin:0 -10px}
-  .wspot .why{font-size:0.8rem;color:var(--amber);margin:-5px 0 9px 36px}
+  .wspot .why{font-family:'Caveat',cursive;font-size:1.05rem;color:var(--amber);margin:-4px 0 9px 36px}
+
+  /* v113 additions — the PA set */
+  .wmeet{position:relative;max-width:400px;background:var(--white);border-radius:2px;
+    box-shadow:0 3px 9px rgba(33,37,43,0.18);padding:20px 18px 14px;margin:16px 0 6px;
+    transform:rotate(-0.4deg)}
+  .wmeet .pclip{position:absolute;top:-11px;left:16px;transform:rotate(-9deg)}
+  .wmeet .pclip path{fill:none;stroke:var(--ink);stroke-width:2.2;stroke-linecap:round}
+  .wmeet h5{font-family:'Fraunces',serif;font-weight:600;font-size:1.1rem;margin-bottom:2px}
+  .wmeet .when{font-family:'IBM Plex Mono',monospace;font-size:0.66rem;letter-spacing:0.1em;
+    text-transform:uppercase;color:var(--redpen);margin-bottom:9px}
+  .wmeet .who{display:flex;gap:7px;margin-bottom:11px}
+  .wmeet .who b{width:28px;height:28px;border:1.6px solid var(--ink);border-radius:50%;
+    font-family:'Caveat',cursive;font-weight:600;font-size:1rem;display:flex;
+    align-items:center;justify-content:center}
+  .wmeet ol{list-style:none;margin-bottom:11px}
+  .wmeet ol li{display:flex;gap:9px;font-size:0.93rem;padding:2px 0}
+  .wmeet ol li b{font-family:'IBM Plex Mono',monospace;font-weight:500;font-size:0.68rem;
+    color:var(--faint);position:relative;top:4px}
+  .wmeet .prep{border-top:1px solid var(--hairline);padding-top:8px}
+  .wmeet .prep .mono,.mlabel{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;
+    letter-spacing:0.1em;text-transform:uppercase;color:var(--faint)}
+  .wchase{max-width:420px;margin:12px 0 6px}
+  .cslip{position:relative;background:var(--white);border:1px solid var(--hairline);
+    border-radius:2px;box-shadow:0 3px 7px rgba(33,37,43,0.15);padding:9px 13px;
+    display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+  .cslip + .cslip{margin-top:-5px}
+  .cslip:nth-child(odd){transform:rotate(-0.6deg)}
+  .cslip:nth-child(even){transform:rotate(0.5deg);margin-left:10px}
+  .cslip .cwhat{font-size:0.92rem;min-width:0}
+  .cslip .cwhat small{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.58rem;
+    letter-spacing:0.1em;text-transform:uppercase;color:var(--faint);margin-top:2px}
+  .cslip .cdays{font-family:'Caveat',cursive;font-weight:600;font-size:1.35rem;color:var(--ink);
+    white-space:nowrap}
+  .cslip.late .cdays{color:var(--redpen);text-decoration:underline;
+    text-decoration-thickness:2px;text-underline-offset:3px}
+  .wtalk{position:relative;max-width:380px;margin:26px 0 6px;background:var(--white);
+    border:1px solid var(--hairline);border-radius:0 2px 2px 2px;
+    box-shadow:0 2px 7px rgba(33,37,43,0.14);padding:14px 16px 11px;transform:rotate(0.3deg)}
+  .wtalk .tab{position:absolute;top:-19px;left:-1px;background:var(--white);
+    border:1px solid var(--hairline);border-bottom:1px solid var(--white);
+    border-radius:4px 4px 0 0;padding:2px 16px 1px;font-family:'IBM Plex Mono',monospace;
+    font-size:0.66rem;font-weight:500;letter-spacing:0.14em;text-transform:uppercase}
+  .wtalk .pt{display:flex;gap:10px;font-size:0.93rem;padding:4px 0}
+  .wtalk .pt::before{content:"—";font-family:'Caveat',cursive;color:var(--biro);flex:none}
+  .wout{display:flex;flex-direction:column;gap:16px;max-width:400px;margin:12px 0 6px}
+  .chit{position:relative;background:var(--white);border:1px solid var(--hairline);
+    border-radius:2px;padding:10px 13px 9px;box-shadow:0 2px 6px rgba(33,37,43,0.13)}
+  .chit::before{content:"";position:absolute;inset:5px -5px -5px 5px;background:var(--stickyY);
+    border:1px solid var(--hairline);border-radius:2px;z-index:-1;transform:rotate(0.8deg)}
+  .chit .chead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
+  .chit .cout{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;font-weight:500;
+    letter-spacing:0.16em;color:var(--white);background:var(--ink);border-radius:2px;
+    padding:2px 7px 1px}
+  .chit .cwho{font-family:'Caveat',cursive;font-size:1.2rem;font-weight:600}
+  .chit .cbody{font-size:0.92rem}
+  .chit .cback{font-family:'Caveat',cursive;font-size:1.05rem;color:var(--moss);margin-top:3px}
+  .wfile{position:relative;max-width:380px;background:var(--stickyYd);border-radius:2px;
+    box-shadow:0 3px 8px rgba(33,37,43,0.18);padding:14px 16px 12px;margin:12px 0 6px;
+    transform:rotate(-0.6deg)}
+  .wfile::after{content:"";position:absolute;right:0;bottom:0;border-style:solid;
+    border-width:0 0 18px 18px;border-color:transparent transparent var(--paper) transparent}
+  .wfile .ftab{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;letter-spacing:0.12em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:6px}
+  .wfile .flesson{font-family:'Kalam',cursive;font-size:0.98rem;line-height:1.45}
+  .wfile .fstamp{position:absolute;top:8px;right:14px;font-family:'IBM Plex Mono',monospace;
+    font-size:0.58rem;font-weight:500;letter-spacing:0.2em;color:var(--redpen);
+    border:2px solid var(--redpen);border-radius:2px;padding:2px 6px 1px;
+    transform:rotate(7deg);opacity:0.75}
+  .wspike{position:relative;height:190px;max-width:340px;margin:14px 0 6px 6px}
+  .wspike svg{position:absolute;left:26px;top:0;height:190px;width:60px;z-index:3;
+    pointer-events:none}
+  .wspike svg line{stroke:var(--ink);stroke-width:2.6;stroke-linecap:round}
+  .wspike svg ellipse{fill:var(--ink)}
+  .spaper{position:absolute;background:var(--white);border:1px solid var(--hairline);
+    border-radius:2px;box-shadow:0 2px 6px rgba(33,37,43,0.16);padding:7px 12px;
+    font-size:0.88rem;max-width:280px}
+  .spaper::before{content:"";position:absolute;top:6px;left:50%;width:5px;height:5px;
+    margin-left:-2px;border-radius:50%;background:var(--ink);opacity:0.55}
+  .wspike .slabel{position:absolute;bottom:-4px;left:110px;font-family:'Caveat',cursive;
+    font-size:1.15rem;color:var(--faint)}
+  .whoriz{max-width:440px;padding-top:26px;margin:6px 0}
+  .shelfrow{display:flex;align-items:flex-end;gap:12px;padding:0 14px}
+  .hcard{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
+    box-shadow:0 2px 5px rgba(33,37,43,0.14);padding:8px 12px;font-family:'Kalam',cursive;
+    font-size:0.9rem;line-height:1.35;max-width:200px;margin-bottom:-2px}
+  .hcard:nth-child(odd){transform:rotate(-1deg)}
+  .hcard:nth-child(even){transform:rotate(0.8deg)}
+  .shelf{position:relative;height:4px;background:var(--ink);border-radius:1px}
+  .shelf::before,.shelf::after{content:"";position:absolute;top:4px;width:3px;height:12px;
+    background:var(--ink)}
+  .shelf::before{left:22px}.shelf::after{right:22px}
+  .whoriz .hlabel{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;letter-spacing:0.12em;
+    text-transform:uppercase;color:var(--faint);margin-top:10px;text-align:right}
 
   /* take collapse + palette subpage (v111) */
   .take-toggle{font-family:'IBM Plex Mono',monospace;font-size:0.65rem;letter-spacing:0.05em;
@@ -907,7 +1101,8 @@
   /* ---------- widgets (presentation licence, spec v110) ---------- */
   function widgetsArr(){ return asArray(state?.widgets); }
   function spotlightFor(actionId){
-    return widgetsArr().find(w => w && w.type === "spotlight" && w.props?.actionId === actionId);
+    return widgetsArr().find(w => w &&
+      (w.type === "spotlight" || w.type === "notice") && w.props?.actionId === actionId);
   }
   function checklistsFor(actionId){
     const out = [];
@@ -925,63 +1120,185 @@
         (it && it.done ? "✓" : "") + '</button>' +
         '<span>' + esc(it && it.text) + '</span></div>').join("") + '</div>';
   }
+  const daysAgo = iso => { const d = Math.floor((Date.now() - new Date(iso)) / 86400000);
+    return isNaN(d) ? null : Math.max(0, d); };
   function cdParts(deadline){
     const ms = new Date(deadline) - Date.now();
     if (isNaN(ms)) return null;
-    if (ms <= 0) return { txt: "passed", close: true };
+    if (ms <= 0) return { txt: "passed", big: "0", unit: "passed", close: true };
     const d = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000);
     return { txt: d ? d + "d " + h + "h" : h + "h " + Math.floor(ms % 3600000 / 60000) + "m",
+      big: String(d || h), unit: d ? (d === 1 ? "day" : "days") : (h === 1 ? "hour" : "hours"),
       close: ms < 48 * 3600000 };
   }
   function widgetHtml(w, wi){
     if (!w || !w.type) return "";
     const prov = w.provenance
       ? '<div class="wprov">' + esc(asArray(w.provenance).join(" · ")) + '</div>' : "";
-    switch (w.type) {
-      case "banner":
-        return '<div class="wban ' + (w.props?.tone === "urgent" ? "urgent" : "info") + '">' +
-          esc(w.props?.text) + prov + '</div>';
-      case "callout":
-        return '<div class="wcall' + (w.props?.tone === "warn" ? " warn" : "") + '">' +
-          esc(w.props?.text) + '</div>';
+    const P = w.props || {};
+    // legacy aliases from earlier boards
+    let type = w.type, tone = P.tone;
+    if (type === "banner")   { type = "notice"; tone = tone === "urgent" ? "urgent" : "info"; }
+    if (type === "callout")  { type = "notice"; tone = tone === "warn" ? "warn" : "note"; }
+    if (type === "spotlight") return "";                 // consumed by the plan render
+    switch (type) {
+      case "notice": {
+        if (P.actionId) return "";                       // attached — consumed by the plan render
+        const t = ["urgent","info","note","warn"].includes(tone) ? tone : "info";
+        const stamp = t === "urgent" ? '<span class="stamp">URGENT</span>' : "";
+        return '<div class="wnotice ' + t + '">' + stamp + esc(P.text) + prov + '</div>';
+      }
       case "checklist":
-        return w.props?.actionId ? "" : chkHtml(w, wi);  // action-anchored: rendered under the action
+        return P.actionId ? "" : chkHtml(w, wi);         // action-anchored: rendered under the action
       case "flow": {
-        const steps = asArray(w.props?.steps);
-        return '<div class="wchk">' +
-          (w.props?.title ? '<h4>' + esc(w.props.title) + '</h4>' : "") +
-          '<div class="wflow">' + steps.map((s, i) =>
-            '<span class="fstep"><b>' + (i + 1) + '</b>' + esc(s) + '</span>')
-            .join('<span class="farr">→</span>') + '</div>' + prov + '</div>';
+        const steps = asArray(P.steps);
+        const arrow = '<svg class="farrow" viewBox="0 0 34 26" aria-hidden="true">' +
+          '<path d="M8 1 C 9 12, 19 13, 22 20"/>' +
+          '<polygon points="23,25 17.5,20.5 24.5,17.5"/></svg>';
+        return '<div class="wflow">' +
+          (P.title ? '<div class="ft">' + esc(P.title) + '</div>' : "") +
+          steps.map((st, i) =>
+            '<div class="fnode"><b>' + (i + 1) + '</b><span>' + esc(st) + '</span></div>')
+            .join(arrow) + prov + '</div>';
       }
       case "countdown": {
-        const p = cdParts(w.props?.deadline);
-        if (!p) return "";
-        return '<div class="wcd' + (p.close ? " close" : "") + '" data-cddl="' +
-          esc(w.props?.deadline) + '">' +
-          '<span class="cdnum">' + esc(p.txt) + '</span>' +
-          '<span class="cdlab">' + esc(w.props?.label) + '</span>' + prov + '</div>';
+        const c = cdParts(P.deadline);
+        if (!c) return "";
+        return '<div class="wcd' + (c.close ? " close" : "") + '" data-cddl="' + esc(P.deadline) + '">' +
+          '<div class="flip"><div class="n">' + c.big + '</div>' +
+          '<div class="u">' + esc(c.unit) + '</div></div>' +
+          '<div class="cdlab">' + esc(P.label) + '</div>' + prov + '</div>';
       }
       case "progress": {
-        const done = +(w.props?.done) || 0, total = +(w.props?.total) || 0;
+        const done = +(P.done) || 0, total = +(P.total) || 0;
         const pct = total ? Math.min(100, Math.round(done / total * 100)) : 0;
-        return '<div class="wprog"><div class="plab"><span>' + esc(w.props?.label) + '</span>' +
-          '<span>' + done + "/" + total + '</span></div>' +
-          '<div class="ptrack"><div class="pfill" style="width:' + pct + '%"></div></div></div>';
+        return '<div class="wprog"><div class="plab">' + esc(P.label) + '</div>' +
+          '<div class="ruler"><div class="ticks"></div>' +
+          '<div class="shade" style="width:' + pct + '%"></div></div>' +
+          '<div class="pfrac">' + done + ' / ' + total + '</div></div>';
       }
       case "decision": {
-        if (w.props?.answer)
-          return '<div class="wdec"><div class="dq">' + esc(w.props?.question) + '</div>' +
-            '<div class="dans">✓ ' + esc(w.props.answer) + '</div>' + prov + '</div>';
-        return '<div class="wdec"><div class="dq">' + esc(w.props?.question) + '</div>' +
-          '<div class="dopts">' + asArray(w.props?.options).map(o =>
-            '<button class="dopt' + (o === w.props?.leaning ? " lean" : "") +
-            (armedDecision === wi + ":" + o ? " armed" : "") +
+        const circle = '<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">' +
+          '<ellipse cx="50" cy="20" rx="47" ry="16"/></svg>';
+        if (P.answer)
+          return '<div class="wdec"><div class="dq">' + esc(P.question) + '</div>' +
+            '<span class="dans">' + esc(P.answer) + circle + '</span>' + prov + '</div>';
+        return '<div class="wdec"><div class="dq">' + esc(P.question) + '</div>' +
+          '<div class="dopts">' + asArray(P.options).map(o =>
+            '<button class="dopt' + (armedDecision === wi + ":" + o ? " armed" : "") +
             '" data-wanswer="' + wi + '" data-opt="' + esc(o) + '">' +
-            esc(armedDecision === wi + ":" + o ? "confirm: " + o : o) +
+            esc(armedDecision === wi + ":" + o ? "confirm " + o : o) +
+            (o === P.leaning ? '<span class="lean">✓?</span>' : "") +
             '</button>').join("") + '</div>' + prov + '</div>';
       }
-      case "spotlight": return "";  // consumed by the plan render
+      case "calendar": {
+        const first = new Date((P.month || "") + "-01T00:00:00");
+        if (isNaN(first)) return "";
+        const y = first.getFullYear(), m = first.getMonth();
+        const dim = new Date(y, m + 1, 0).getDate();
+        const lead = (first.getDay() + 6) % 7;            // Monday-start
+        const marks = {}; asArray(P.marks).forEach(x => {
+          const d = new Date(x.date); if (!isNaN(d) && d.getMonth() === m) marks[d.getDate()] = x.label; });
+        const now = new Date();
+        const today = (now.getFullYear() === y && now.getMonth() === m) ? now.getDate() : 0;
+        const ellipse = '<svg viewBox="0 0 30 30" preserveAspectRatio="none" aria-hidden="true">' +
+          '<ellipse cx="15" cy="15" rx="13" ry="12"/></svg>';
+        let cells = ["MO","TU","WE","TH","FR","SA","SU"].map(h => '<div class="ch">' + h + '</div>').join("");
+        for (let i = 0; i < lead; i++) cells += '<div class="cd out"></div>';
+        for (let d = 1; d <= dim; d++)
+          cells += '<div class="cd' + (marks[d] ? " mark" : "") + (d === today ? " today" : "") + '">' +
+            d + (d === today ? ellipse : "") + '</div>';
+        const legend = Object.keys(marks).map(d =>
+          '<div><b>' + d + '</b>' + esc(marks[d]) + '</div>').join("");
+        return '<div class="wcal"><div class="cmon">' +
+          esc(first.toLocaleDateString("en-GB", { month: "long", year: "numeric" })) + '</div>' +
+          '<div class="cgrid">' + cells + '</div>' +
+          (legend ? '<div class="clegend">' + legend + '</div>' : "") + prov + '</div>';
+      }
+      case "tally": {
+        const count = Math.max(0, Math.min(200, +(P.count) || 0));
+        const gates = Math.floor(count / 5), rem = count % 5;
+        const grp = n => { let l = "";
+          for (let i = 0; i < n; i++) l += '<line x1="' + (5 + i * 7) + '" y1="3" x2="' + (5 + i * 7) + '" y2="27"/>';
+          if (n === 5) { l = l.replace('x1="33"', 'x1="26"'); }
+          return l; };
+        let svgs = "";
+        for (let g = 0; g < gates; g++)
+          svgs += '<svg viewBox="0 0 36 30" width="36">' + grp(4) +
+            '<line class="g" x1="0" y1="25" x2="32" y2="5"/></svg>';
+        if (rem) svgs += '<svg viewBox="0 0 36 30" width="36">' + grp(rem) + '</svg>';
+        return '<div class="wtally">' + (svgs || '<svg viewBox="0 0 36 30" width="36"></svg>') +
+          '<span class="tlab">' + count + (P.of ? " of " + esc(P.of) : "") +
+          (P.label ? " — " + esc(P.label) : "") + '</span>' + prov + '</div>';
+      }
+      case "meeting": {
+        const items = asArray(P.items);
+        let when = String(P.when || "");
+        const dt = new Date(when);
+        if (!isNaN(dt) && /^\d{4}-\d{2}-\d{2}/.test(when))
+          when = dt.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" }).toUpperCase() +
+            (when.length > 10 ? " · " + dt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : "");
+        return '<div class="wmeet">' +
+          '<svg class="pclip" width="26" height="34" viewBox="0 0 26 34" aria-hidden="true">' +
+          '<path d="M8 26 V8 a5 5 0 0 1 10 0 V27 a8 8 0 0 1 -16 0 V10"/></svg>' +
+          '<h5>' + esc(P.title) + '</h5>' +
+          (when ? '<div class="when">' + esc(when) + '</div>' : "") +
+          (P.who ? '<div class="who">' + asArray(P.who).map(x =>
+            '<b>' + esc(String(x).trim().charAt(0).toUpperCase()) + '</b>').join("") + '</div>' : "") +
+          '<ol>' + asArray(P.agenda).map((a, n) =>
+            '<li><b>' + (n + 1) + '</b><span>' + esc(a) + '</span></li>').join("") + '</ol>' +
+          (items.length ? '<div class="prep"><span class="mlabel">Prep</span>' +
+            items.map((it, ii) => '<div class="witem' + (it && it.done ? " done" : "") + '">' +
+              '<button class="tick" data-wcheck="' + wi + ":" + ii + '" aria-label="Toggle prep item">' +
+              (it && it.done ? "✓" : "") + '</button>' +
+              '<span>' + esc(it && it.text) + '</span></div>').join("") + '</div>' : "") +
+          prov + '</div>';
+      }
+      case "chase": {
+        return '<div class="wchase">' + asArray(P.items).map(it => {
+          const d = daysAgo(it.sent); if (d === null) return "";
+          return '<div class="cslip' + (d >= 7 ? " late" : "") + '">' +
+            '<div class="cwhat">' + esc(it.what) +
+            '<small>to ' + esc(it.who) + ' · sent ' +
+            esc(new Date(it.sent).toLocaleDateString("en-GB", { day: "numeric", month: "short" })) +
+            '</small></div>' +
+            '<div class="cdays">' + d + (d === 1 ? " day" : " days") + '</div></div>';
+        }).join("") + prov + '</div>';
+      }
+      case "talking":
+        return '<div class="wtalk"><div class="tab">' + esc(P.person) + '</div>' +
+          asArray(P.points).map(pt => '<div class="pt"><span>' + esc(pt) + '</span></div>').join("") +
+          prov + '</div>';
+      case "outwork":
+        return '<div class="wout">' + asArray(P.items).map(it =>
+          '<div class="chit"><div class="chead"><span class="cout">OUT WITH</span>' +
+          '<span class="cwho">' + esc(it.who) + '</span></div>' +
+          '<div class="cbody">' + esc(it.what) + '</div>' +
+          (it.back ? '<div class="cback">back: ' + esc(it.back) + '</div>' : "") +
+          '</div>').join("") + prov + '</div>';
+      case "fromfiles":
+        return '<div class="wfile"><span class="fstamp">FILE</span>' +
+          '<div class="ftab">' + esc(P.from || "FROM THE FILE") + '</div>' +
+          '<div class="flesson">' + esc(P.lesson) + '</div>' + prov + '</div>';
+      case "spike": {
+        const pos = [{ top: 18, left: 60, r: -2 }, { top: 74, left: 44, r: 1.5 }, { top: 128, left: 68, r: -1 }];
+        const items = asArray(P.items);
+        return '<div class="wspike">' +
+          '<svg viewBox="0 0 60 190" aria-hidden="true">' +
+          '<line x1="30" y1="6" x2="30" y2="176"/>' +
+          '<ellipse cx="30" cy="180" rx="20" ry="6"/></svg>' +
+          items.slice(0, 3).map((t, n) =>
+            '<div class="spaper" style="top:' + pos[n].top + 'px;left:' + pos[n].left +
+            'px;transform:rotate(' + pos[n].r + 'deg)">' + esc(t) +
+            (n === 2 && items.length > 3 ? ' <span style="color:var(--faint)">+' + (items.length - 3) + ' more</span>' : "") +
+            '</div>').join("") +
+          '<div class="slabel">parked, on purpose</div></div>';
+      }
+      case "horizon":
+        return '<div class="whoriz"><div class="shelfrow">' +
+          asArray(P.items).slice(0, 4).map(t => '<div class="hcard">' + esc(t) + '</div>').join("") +
+          '</div><div class="shelf"></div>' +
+          '<div class="hlabel">the long game</div></div>';
       default: return "";           // unknown type — forward-compatible, render nothing
     }
   }
@@ -1035,7 +1352,8 @@
       document.querySelectorAll("[data-cddl]").forEach(el => {
         const p = cdParts(el.dataset.cddl); if (!p) return;
         el.classList.toggle("close", p.close);
-        const n = el.querySelector(".cdnum"); if (n) n.textContent = p.txt;
+        const n = el.querySelector(".flip .n"); if (n) n.textContent = p.big;
+        const u = el.querySelector(".flip .u"); if (u) u.textContent = p.unit;
       });
     }, 30000);
   }
@@ -1043,37 +1361,74 @@
   /* ---------- palette subpage (#palette) — display-only gallery ---------- */
   function paletteDemos(){
     const soon = new Date(Date.now() + 3.2 * 86400000).toISOString();
+    const thisMonth = new Date().toISOString().slice(0, 7);
+    const d5 = thisMonth + "-05", d18 = thisMonth + "-18";
     return [
-      { name: "Banner", what: "A full-width strip at the very top. Info tone for a standing notice; urgent (red on amber) only when the day has one screaming, unrecoverable priority. Never more than one.",
-        w: { type: "banner", props: { text: "Example: kick-offs freeze Wednesday — feed test must pass before then.", tone: "urgent" } } },
-      { name: "Callout", what: "A sticky-note aside inside a project card — context worth keeping in view, in Claude's hand.",
-        w: { type: "callout", props: { text: "Example: Louie is away Friday — anything for YIR needs to land Thursday.", tone: "note" } } },
-      { name: "Checklist", what: "A real sub-task breakdown with tickable items, sitting in its project or under a specific action. Never a restatement of the plan.",
+      { name: "Notice", what: "Words that must be seen. Urgent gets the red stamp at the top of the page (one at most, rare); a note is a sticky aside in a project; attached to a plan action it lifts that line on amber with the reason in the margin.",
+        w: { type: "notice", props: { text: "Example: kick-offs freeze Wednesday — the feed test must pass first.", tone: "urgent" } } },
+      { name: "Checklist", what: "A torn notebook strip with tickable sub-tasks and a running count. For genuine breakdowns of one job, never a restatement of the plan.",
         w: { type: "checklist", props: { title: "Example: portal batch one", items: [
           { text: "Create the first twelve club portals", done: true },
           { text: "Upload the folder structure", done: false },
           { text: "Spot-check two portals end to end", done: false } ] } } },
-      { name: "Flow", what: "A short numbered sequence rendered as connected steps — for genuine order-matters processes.",
+      { name: "Flow", what: "A real diagram: numbered index cards joined by drawn arrows, for processes where order matters.",
         w: { type: "flow", props: { title: "Example: publish routine", steps: ["Draft", "Review", "Send", "File the reply"] } } },
-      { name: "Spotlight", what: "Lifts one action in the plan on an amber field, with the reason it deserves the next hour.",
-        w: null },
-      { name: "Countdown", what: "A live run-down to a hard date. Goes red-pen inside 48 hours.",
-        w: { type: "countdown", props: { label: "Example: days to the freeze", deadline: soon } } },
-      { name: "Progress", what: "A bar for long slogs — where done-out-of-total is the honest picture of a project.",
+      { name: "Countdown", what: "A flip-card day counter to a hard date. Goes red inside 48 hours.",
+        w: { type: "countdown", props: { label: "Example: to the kick-off freeze", deadline: soon } } },
+      { name: "Progress", what: "A ruler with pencil shading for long slogs — the honest fraction written underneath.",
         w: { type: "progress", props: { label: "Example: clubs analysed", done: 24, total: 72 } } },
-      { name: "Decision", what: "A fork only you can call. Tap an option, tap again to confirm — the card marks itself answered and the answer is filed as a note for the next compile.",
-        w: { type: "decision", props: { question: "Example: meeting Monday or Tuesday?", options: ["Monday", "Tuesday"] } } }
+      { name: "Decision", what: "A fork only you can call, as paper slips. Tap one, tap confirm — it gets the red-pen circle and the answer is filed as a note for the next compile.",
+        w: { type: "decision", props: { question: "Example: meeting Monday or Tuesday?", options: ["Monday", "Tuesday"], leaning: "Tuesday" } } },
+      { name: "Calendar", what: "A page-a-month grid marking only the dates the board actually knows. Today gets the red-pen circle.",
+        w: { type: "calendar", props: { month: thisMonth, marks: [
+          { date: d5, label: "Kick-offs freeze (example)" },
+          { date: d18, label: "First live broadcast (example)" } ] } } },
+      { name: "Tally", what: "Counting by hand — gate marks in ink, the fifth stroke in red. For running counts that feel like effort.",
+        w: { type: "tally", props: { count: 24, of: 72, label: "clubs chased (example)" } } },
+      { name: "Meeting card", what: "The agenda one-pager: when, who's in the room, the points, and a tickable prep list.",
+        w: { type: "meeting", props: { title: "Example: well-being handover", when: "TUE 4 AUG · TIME TBC",
+          who: ["Martin", "Benny", "Richard"],
+          agenda: ["Direction and UX ownership move across", "Content chunks stop", "Agree the review rhythm"],
+          items: [ { text: "One-page brief on where the tool stands", done: true },
+                   { text: "List of open UX calls they now own", done: false } ] } } },
+      { name: "Chase pile", what: "The out-tray: sent and awaiting reply, day counts in hand, red underline past a week.",
+        w: { type: "chase", props: { items: [
+          { what: "Example: letter to Phil", who: "Phil", sent: new Date(Date.now() - 2 * 86400000).toISOString() },
+          { what: "Example: proposed TOTW hours", who: "Sam", sent: new Date(Date.now() - 6 * 86400000).toISOString() },
+          { what: "Example: feed-test date", who: "Louie, YIR", sent: new Date(Date.now() - 9 * 86400000).toISOString() } ] } } },
+      { name: "Talking points", what: "The standing per-person queue on an index divider — for your next conversation, scheduled or not.",
+        w: { type: "talking", props: { person: "Phil", points: [
+          "Example: TOTW handback — the ask and the grounds",
+          "Example: DAZN infrastructure — clubs not at fault",
+          "Example: the ECAL deck angle needs a rethink" ] } } },
+      { name: "Out with others", what: "Carbon-copy delegation chits: work signed out, what comes back, roughly when.",
+        w: { type: "outwork", props: { items: [
+          { what: "Example: 72 club portals + folders", who: "Tom", back: "first batch after session two" },
+          { what: "Example: well-being direction + UX", who: "Martin + Benny", back: "from Tuesday" } ] } } },
+      { name: "From the files", what: "An aged card surfacing one lesson from the board's own history when something recurs.",
+        w: { type: "fromfiles", props: { from: "FROM THE FILE · 31 JUL",
+          lesson: "Example: last launch, the feed test slipped a week — lock the test date first this time." } } },
+      { name: "The spike", what: "Parked on purpose — blue-sky and later items impaled visibly, never forgotten.",
+        w: { type: "spike", props: { items: [
+          "Example: league content strategy — the umbrella",
+          "Example: club-facing delivery view prototype",
+          "Example: get_table caveat fix" ] } } },
+      { name: "Horizon shelf", what: "The long game standing on a high shelf, always in view, never in the way.",
+        w: { type: "horizon", props: { items: [
+          "Example: wider content strategy for the league",
+          "Example: Tom as the first concrete move on it" ] } } }
     ];
   }
   function renderPalette(){
-    const spotDemo = '<div class="wspot"><div class="pitem">' +
+    const attachedDemo = '<div class="wspot"><div class="pitem">' +
       '<button class="tick"></button><div><div class="ptext">Example: send the outreach email</div>' +
       '<div class="pproj">72-club directory</div></div></div>' +
-      '<div class="why">Deadline is today — this beats everything else on the list.</div></div>';
+      '<div class="why">← this one — the deadline is today</div></div>';
     $("palList").innerHTML = paletteDemos().map(d =>
       '<div class="pal-item"><h3>' + esc(d.name) + '</h3>' +
       '<div class="pal-what">' + esc(d.what) + '</div>' +
-      '<div class="demo">' + (d.w ? widgetHtml(d.w, -1) : spotDemo) + '</div></div>').join("");
+      '<div class="demo">' + widgetHtml(d.w, -1) +
+      (d.name === "Notice" ? attachedDemo : "") + '</div></div>').join("");
     startCountdowns();
   }
 
@@ -1146,8 +1501,9 @@
         '<div><div class="ptext">' + esc(f.a.text) + '</div>' +
         '<div class="pproj">' + esc(f.p.title) + '</div></div></div>';
       const sp = spotlightFor(id);
+      const why = sp && (sp.props?.reason || sp.props?.text);
       return sp ? '<div class="wspot">' + core +
-        (sp.props?.reason ? '<div class="why">' + esc(sp.props.reason) + '</div>' : "") +
+        (why ? '<div class="why">' + esc(why) + '</div>' : "") +
         '</div>' : core;
     }).join("") || '<p class="msg" style="margin:0;text-align:left">No plan authored yet — run a compile.</p>';
 
