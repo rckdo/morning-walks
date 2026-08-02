@@ -1735,4 +1735,289 @@
       }
       const replyHtml = replyingId === t.id
         ? '<div class="reply-wrap"><input data-replyinput="' + esc(t.id) + '" placeholder="Reply… (Enter to stick)"></div>'
-        : '<button class="plu
+        : '<button class="plusbtn" data-reply="' + esc(t.id) + '" aria-label="Reply with a green sticky">+</button>';
+      const marginHtml = '<div class="marginCell">' + stackHtml + replyHtml + '</div>';
+
+      const textHtml = editingId === t.id
+        ? '<input class="edit task-size" data-edit="' + esc(t.id) + '" value="' + esc(t.text) + '">'
+        : '<div class="task-text" data-text="' + esc(t.id) + '" title="Click to edit">' + esc(t.text) + '</div>';
+
+      return '<div class="task' + (t.done ? " done" : "") + '">' +
+        '<button class="tick" data-tick="' + esc(t.id) + '" aria-label="Toggle done">' + (t.done ? "✓" : "") + '</button>' +
+        '<div class="task-body">' + textHtml +
+        '<div class="task-actions">' +
+          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("task", t.text) + '">discuss</a>' +
+          '<button class="del" data-del="' + esc(t.id) + '">delete</button>' +
+        '</div></div>' + marginHtml + '</div>';
+    }).join("") || '<p class="msg">No tasks yet — add one below.</p>';
+
+    // fronts
+    $("fronts").innerHTML = asArray(state.fronts).map(f =>
+      '<div class="front"><h3>' + esc(f.title) + '</h3>' +
+      '<div class="status">' + esc(f.status) + '</div>' +
+      (f.liveEdge ? '<div class="edge">' + esc(f.liveEdge) + '</div>' : "") +
+      '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("front", f.title) + '">discuss</a>' +
+      '</div>').join("");
+
+    // ideas
+    $("ideasList").innerHTML = currentIdeas().map(i => {
+      const threadHtml = i.thread.length
+        ? '<div class="idea-thread">' + i.thread.map(e =>
+            '<div class="idea-entry ' + (e.who === "claude" ? "claude" : "") + '">' +
+            '<span class="who">' + (e.who === "claude" ? "Claude" : "You") + '</span>' +
+            '<span class="body">' + esc(e.text) + '</span>' +
+            '<span class="ts">' + esc(fmtDateTs(e.ts)) + '</span></div>').join("") + '</div>'
+        : "";
+      const thoughtInput = thoughtingId === i.id
+        ? '<input class="note-input" data-thoughtinput="' + esc(i.id) + '" placeholder="Your thought… (Enter to save)">'
+        : "";
+      return '<div class="idea"><div class="idea-head">' +
+        '<h3>' + esc(i.title) + '</h3>' +
+        '<button class="idea-state ' + esc(i.state || "thrashing") + '" data-state="' + esc(i.id) + '" title="Click to change state">' + esc(i.state || "thrashing") + '</button>' +
+        '</div>' + threadHtml + thoughtInput +
+        '<div class="idea-actions">' +
+          '<button class="plusbtn" data-thought="' + esc(i.id) + '" aria-label="Add a thought">+</button>' +
+          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("idea", i.title) + '">discuss</a>' +
+          '<button class="del" data-ideadel="' + esc(i.id) + '">delete</button>' +
+        '</div></div>';
+    }).join("") || '<p class="msg" style="margin:0 0 16px;text-align:left">No ideas in play — seed one below.</p>';
+
+    // free notes
+    $("richardsNotes").innerHTML = currentFreeNotes().map((n, i) => {
+      const isEditing = editingFreeNote === i;
+      const body = isEditing
+        ? '<input class="edit note-size" data-freenoteedit="' + i + '" value="' + esc(n.text) + '">'
+        : '<span class="note-text" data-freenotetext="' + i + '" title="Click to edit">' + esc(n.text) + '</span>' +
+          '<button class="note-del" data-freenotedel="' + i + '" aria-label="Delete note">×</button>';
+      return '<p><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' + body + '</p>';
+    }).join("");
+
+    wire();
+    show("app");
+  }
+
+  function wire(){
+    document.querySelectorAll("[data-tick]").forEach(b => b.onclick = () => toggleDone(b.dataset.tick));
+    document.querySelectorAll("[data-text]").forEach(el =>
+      el.onclick = () => { editingId = el.dataset.text; render(); });
+    document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteTask(b.dataset.del));
+    document.querySelectorAll("[data-reply]").forEach(b =>
+      b.onclick = () => { replyingId = b.dataset.reply; render(); });
+
+    document.querySelectorAll("[data-stack]").forEach(el =>
+      el.onclick = e => {
+        if (e.target.closest("button,input")) return;    // controls don't toggle
+        const id = el.dataset.stack;
+        expandedId = expandedId === id ? null : id;
+        editingEntry = null;
+        render();
+      });
+    document.querySelectorAll("[data-entrytext]").forEach(b =>
+      b.onclick = () => { const [tid, i] = b.dataset.entrytext.split(":");
+        editingEntry = { taskId: tid, idx: +i }; render(); });
+    document.querySelectorAll("[data-entrydel]").forEach(b =>
+      b.onclick = () => { const [tid, i] = b.dataset.entrydel.split(":"); deleteEntry(tid, +i); });
+
+    document.querySelectorAll("[data-state]").forEach(b => b.onclick = () => cycleState(b.dataset.state));
+    document.querySelectorAll("[data-ideadel]").forEach(b => b.onclick = () => deleteIdea(b.dataset.ideadel));
+    document.querySelectorAll("[data-thought]").forEach(b =>
+      b.onclick = () => { thoughtingId = b.dataset.thought; render(); });
+    document.querySelectorAll("[data-freenotetext]").forEach(el =>
+      el.onclick = () => { editingFreeNote = +el.dataset.freenotetext; render(); });
+    document.querySelectorAll("[data-freenotedel]").forEach(b =>
+      b.onclick = () => deleteFreeNote(+b.dataset.freenotedel));
+
+    // single-commit inputs (Enter and blur can otherwise both fire around a re-render)
+    function once(inp, save, cancel){
+      let done = false;
+      const commit = () => { if (done) return; done = true;
+        inp.onblur = null; inp.onkeydown = null; save(inp.value); };
+      inp.onkeydown = e => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { if (done) return; done = true;
+          inp.onblur = null; inp.onkeydown = null; cancel(); }
+      };
+      inp.onblur = commit;
+    }
+    document.querySelectorAll("[data-edit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      once(inp, v => saveText(inp.dataset.edit, v), () => { editingId = null; render(); });
+    });
+    document.querySelectorAll("[data-replyinput]").forEach(inp => {
+      inp.focus();
+      once(inp, v => addReply(inp.dataset.replyinput, v), () => { replyingId = null; render(); });
+    });
+    document.querySelectorAll("[data-entryedit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      const [tid, i] = inp.dataset.entryedit.split(":");
+      once(inp, v => saveEntryEdit(tid, +i, v), () => { editingEntry = null; render(); });
+    });
+    document.querySelectorAll("[data-thoughtinput]").forEach(inp => {
+      inp.focus();
+      once(inp, v => addThought(inp.dataset.thoughtinput, v), () => { thoughtingId = null; render(); });
+    });
+    document.querySelectorAll("[data-freenoteedit]").forEach(inp => {
+      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+      const i = +inp.dataset.freenoteedit;
+      once(inp, v => saveFreeNoteEdit(i, v), () => { editingFreeNote = null; render(); });
+    });
+  }
+
+  function discussUrl(kind, title){
+    const prompt = "Walk judgement focus — " + kind + ': "' + title + '". ' +
+      "Read the walk reference first, then give me focused judgement and advice on this specific " +
+      kind + ", and update its annotation in the reference.";
+    return "https://claude.ai/new?q=" + encodeURIComponent(prompt);
+  }
+
+  /* ---------- Mark It ---------- */
+  const REVIEW_URL = "https://morning-walks-419435526393.europe-west1.run.app/review/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
+  let toastTimer;
+  function toast(msg, ms){
+    const t = $("toast");
+    t.textContent = msg; t.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3500);
+  }
+  /* ---------- auto-mark bar ---------- */
+  const RUN_MINUTE = 36;   // the scheduled task fires at :36 past each hour — update if the schedule changes
+  let reviewState = null;
+  setInterval(() => {
+    const el = $("cdTimer"); if (!el) return;
+    const now = new Date();
+    const next = new Date(now);
+    next.setMinutes(RUN_MINUTE, 0, 0);
+    if (next <= now) next.setHours(next.getHours() + 1);
+    const secs = Math.floor((next - now) / 1000);
+    el.textContent = String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
+  }, 1000);
+
+  async function sha256hex(str){
+    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+  }
+  // must mirror the server's v2Signature exactly
+  async function clientSignature(){
+    const notes = asArray(state?.notes).filter(n => n.state === "open")
+      .map(n => ({ id: n.id, text: n.text }));
+    const done = {};
+    asArray(state?.projects).forEach(p => asArray(p.actions).forEach(a => { done[a.id] = !!a.done; }));
+    return sha256hex(JSON.stringify({ notes, done, date: state?.plan?.date || "" }));
+  }
+  async function updateMarkEst(){
+    const el = $("markEst"); if (!el || !state || !state.projects) return;
+    try {
+      const sig = await clientSignature();
+      if (reviewState && reviewState.sig === sig) {
+        el.textContent = "free — nothing new to judge (auto run will skip too)";
+        return;
+      }
+      let countTxt = "";
+      if (reviewState && reviewState.basis) {
+        const b = reviewState.basis; let c = 0;
+        const doneNow = {};
+        asArray(state.projects).forEach(p => asArray(p.actions).forEach(a => { doneNow[a.id] = !!a.done; }));
+        new Set([...Object.keys(doneNow), ...Object.keys(b.done || {})]).forEach(id => {
+          if (!!doneNow[id] !== !!(b.done || {})[id]) c++;
+        });
+        const openNow = asArray(state.notes).filter(n => n.state === "open");
+        const nowHashes = {};
+        for (const n of openNow) nowHashes[n.id] = await sha256hex(String(n.text || ""));
+        new Set([...Object.keys(nowHashes), ...Object.keys(b.notes || {})]).forEach(id => {
+          if (nowHashes[id] !== (b.notes || {})[id]) c++;
+        });
+        if ((state.plan?.date || "") !== (b.date || "")) c++;
+        if (c) countTxt = c + " change" + (c > 1 ? "s" : "") + " waiting \u00b7 ";
+      }
+      const ctx = { ...state };
+      delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
+      delete ctx.ideas; delete ctx.claudesTake;
+      const tokens = JSON.stringify(ctx).length / 4 + 500;
+      const pence = Math.max(1, Math.round((tokens * 3e-6 + 500 * 15e-6) * 79));
+      el.textContent = countTxt + "\u2248 " + pence + "p \u00b7 or wait for the free run";
+    } catch { el.textContent = ""; }
+  }
+  $("markNowBtn").addEventListener("click", () => {
+    const b = $("markNowBtn"); b.disabled = true;
+    $("markBtn").click();
+    setTimeout(() => { b.disabled = false; }, 4000);
+  });
+
+  /* ---------- spend meter ---------- */
+  function renderSpend(u){
+    const el = $("spendTally");
+    if (!u || !u.calls) { el.textContent = ""; return; }
+    const usd = (u.inTok || 0) * 3 / 1e6 + (u.outTok || 0) * 15 / 1e6;
+    const since = u.since ? new Date(u.since) : null;
+    el.textContent = "\u2248 $" + usd.toFixed(2) + " used \u00b7 " + u.calls + " calls" +
+      (since && !isNaN(since) ? " since " + since.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" }) : "");
+  }
+
+  /* ---------- Tools: /assist ---------- */
+  const ASSIST_URL = "https://morning-walks-419435526393.europe-west1.run.app/assist/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
+  async function runAssist(fn, input, statusEl, outEl, headEl, btn){
+    const user = firebase.auth().currentUser;
+    if (!user) { statusEl.textContent = "sign in first"; return; }
+    btn.disabled = true;
+    statusEl.textContent = "drafting…";
+    try {
+      const token = await user.getIdToken();
+      const r = await fetch(ASSIST_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", "authorization": "Bearer " + token },
+        body: JSON.stringify({ function: fn, input: input })
+      });
+      const text = await r.text();
+      if (!r.ok) throw new Error(text || ("HTTP " + r.status));
+      outEl.textContent = text;
+      outEl.classList.remove("hidden");
+      headEl.classList.remove("hidden");
+      statusEl.textContent = "";
+    } catch (e) {
+      statusEl.textContent = "failed: " + (e.message || e).slice(0, 120);
+    }
+    btn.disabled = false;
+  }
+  $("composeBtn").addEventListener("click", () => {
+    const input = $("composeInput").value.trim();
+    if (!input) { $("composeStatus").textContent = "give it some context first"; return; }
+    runAssist("compose_email", input, $("composeStatus"), $("composeOutput"),
+      $("composeOutHead"), $("composeBtn"));
+  });
+  $("composeCopy").addEventListener("click", () => {
+    navigator.clipboard.writeText($("composeOutput").textContent)
+      .then(() => toast("Draft copied."))
+      .catch(() => toast("Copy failed — select and copy manually."));
+  });
+
+  $("markBtn").addEventListener("click", async () => {
+    const btn = $("markBtn");
+    btn.disabled = true;
+    toast("Asking Claude to mark the board…", 8000);
+    try {
+      const r = await fetch(REVIEW_URL, { method: "POST" });
+      const text = await r.text();
+      if (r.ok) toast(text || "Marked — watch the margin.");
+      else throw new Error(text || ("HTTP " + r.status));
+    } catch (e) {
+      toast("Reviewer not live — opening a Claude chat instead.");
+      window.open("https://claude.ai/new?q=" + encodeURIComponent(
+        "Run a walk judgement: read the walk reference, judge the day's shape, reply into any stacks and idea threads where the last word was mine, and write it all back."),
+        "_blank", "noopener");
+    }
+    btn.disabled = false;
+  });
+
+  function fmtTs(ts){
+    if (!ts) return "";
+    const d = new Date(ts);
+    return isNaN(d) ? String(ts) : d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+  }
+  function fmtDateTs(ts){
+    if (!ts) return "";
+    const d = new Date(ts);
+    return isNaN(d) ? "" : d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+  }
+</script>
+</body>
+</html>
