@@ -1,9 +1,17 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v113.0 — 01/08/2026
+  v114.0 — 02/08/2026
 
   Changelog:
+  v114.0 — In-tray, not a wall. Supersedes v113.0. The inbox loses its
+          solid green slab: now a white tray with a small green IN TRAY
+          tab (kin to the talking-points divider), a one-line composer
+          that grows on focus, and green kept for what earns it — the
+          note stickies themselves. Empty state is a slim letterbox, not
+          a field. Paired release: server v114 (concurrency-safe writes —
+          basis check + patch-only) ships separately once the v94 source
+          is to hand; no schema or rules change either side.
   v113.0 — The PA set. Supersedes v112.0. Seven types join the desk:
           meeting (clipped agenda sheet — when, circled initials, numbered
           points, tickable prep; prep lives at props.items so the existing
@@ -400,12 +408,19 @@
   .hidden{display:none}
 
   /* inbox — the front door */
-  .inbox{margin:18px 0 6px;padding:14px 16px;background:var(--stickyG);border-radius:2px;
-    box-shadow:0 3px 8px rgba(33,37,43,0.16);transform:rotate(0.3deg)}
-  .inbox h2{margin-bottom:10px;color:var(--biro)}
-  .inbox .composer{margin-top:0}
-  .inbox .composer textarea{min-height:76px;background:#fff}
-  .inbox #notesV2{margin-top:10px}
+  .inbox{position:relative;margin:30px 0 6px;padding:12px 14px 10px;background:var(--white);
+    border:1px solid var(--hairline);border-radius:0 2px 2px 2px}
+  .inbox h2{position:absolute;top:-21px;left:-1px;margin:0;background:var(--stickyG);
+    border:1px solid var(--hairline);border-bottom:1px solid var(--stickyG);
+    border-radius:4px 4px 0 0;padding:2px 14px 1px;font-family:'IBM Plex Mono',monospace;
+    font-size:0.66rem;font-weight:500;letter-spacing:0.14em;text-transform:uppercase;
+    color:var(--ink)}
+  .inbox .composer{margin-top:0;display:flex;gap:8px;align-items:flex-end}
+  .inbox .composer textarea{min-height:38px;max-height:160px;background:var(--white);flex:1;
+    transition:min-height 0.15s ease}
+  .inbox .composer textarea:focus{min-height:76px}
+  .inbox #notesV2{margin-top:8px}
+  .inbox #notesV2:empty{margin-top:0}
 
   /* auto-mark bar */
   .autobar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
@@ -742,7 +757,7 @@
   <div id="v2zone" class="hidden">
     <div id="wTop"></div>
     <div class="inbox">
-      <h2>Inbox</h2>
+      <h2>In tray</h2>
       <div class="composer">
         <textarea id="noteComposer" placeholder="Say anything — scatty is fine. It lands here as a note; the next compile sorts it properly."></textarea>
         <button id="noteSendBtn">Send</button>
