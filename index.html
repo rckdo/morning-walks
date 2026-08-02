@@ -1,9 +1,20 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v116.0 — 02/08/2026
+  v117.0 — 02/08/2026
 
   Changelog:
+  v117.0 — Level desk. Supersedes v116.0. Top widgets move from flex to a
+          fluid grid (auto-fit, minmax 290px) so widths are percentages of
+          the row, columns align, nothing overhangs and wrapping stops
+          janking; the chit's carbon copy is tucked inside its cell. The
+          spike is redesigned after review: absolute-positioned papers on
+          a drawn pin (which overflowed and collided) become pinned slips
+          in normal flow — each slip carries a red pushpin head, "parked,
+          on purpose" keeps the meaning. Sections are now visibly
+          distinct: Today's plan and Board changes sit on white sheets,
+          projects stay on the desk paper between them. "The board"
+          renamed "Projects".
   v116.0 — Reading order. Supersedes v115.0. New top-of-page sequence at
           Richard's direction: the auto-mark bar first (restyled from a
           yellow sticky into a quiet right-aligned mono status strip under
@@ -452,15 +463,16 @@
     font-family:'IBM Plex Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;
     text-transform:uppercase;color:var(--faint)}
 
-  #wTop{display:flex;flex-wrap:wrap;gap:20px 24px;align-items:flex-start;margin:14px 0 6px}
-  #wTop > *{margin:0}
+  main > section{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
+    padding:18px 18px 14px;align-self:start}
+  main aside .diffs{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
+    padding:16px 18px 14px;margin-top:30px}
+  #wTop{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
+    gap:26px 24px;align-items:start;margin:14px 0 10px}
+  #wTop > *{margin:0;max-width:100%;min-width:0}
   #wTop > .wtalk{margin-top:19px}
-  #wTop > .wnotice{flex:1 1 100%}
-  @media(max-width:820px){
-    #wTop{display:block}
-    #wTop > *{margin:12px 0 6px}
-    #wTop > .wtalk{margin-top:26px}
-  }
+  #wTop > .wnotice{grid-column:1/-1}
+  @media(max-width:820px){#wTop{grid-template-columns:1fr;gap:18px}}
   /* widgets — the desk set (v112): each widget a distinct desk object; the red pen is the signature.
      Ruled lines, ruler ticks and pencil hatching below are representational (the artefact itself),
      not surface decoration — deliberate exceptions to the no-stripes rule. */
@@ -624,6 +636,7 @@
   .wout{display:flex;flex-direction:column;gap:16px;max-width:400px;margin:12px 0 6px}
   .chit{position:relative;background:var(--white);border:1px solid var(--hairline);
     border-radius:2px;padding:10px 13px 9px;box-shadow:0 2px 6px rgba(33,37,43,0.13)}
+  .chit{margin-right:5px;margin-bottom:5px}
   .chit::before{content:"";position:absolute;inset:5px -5px -5px 5px;background:var(--stickyY);
     border:1px solid var(--hairline);border-radius:2px;z-index:-1;transform:rotate(0.8deg)}
   .chit .chead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px}
@@ -645,18 +658,20 @@
     font-size:0.58rem;font-weight:500;letter-spacing:0.2em;color:var(--redpen);
     border:2px solid var(--redpen);border-radius:2px;padding:2px 6px 1px;
     transform:rotate(7deg);opacity:0.75}
-  .wspike{position:relative;height:190px;max-width:340px;margin:14px 0 6px 6px}
-  .wspike svg{position:absolute;left:26px;top:0;height:190px;width:60px;z-index:3;
-    pointer-events:none}
-  .wspike svg line{stroke:var(--ink);stroke-width:2.6;stroke-linecap:round}
-  .wspike svg ellipse{fill:var(--ink)}
-  .spaper{position:absolute;background:var(--white);border:1px solid var(--hairline);
-    border-radius:2px;box-shadow:0 2px 6px rgba(33,37,43,0.16);padding:7px 12px;
-    font-size:0.88rem;max-width:280px}
-  .spaper::before{content:"";position:absolute;top:6px;left:50%;width:5px;height:5px;
-    margin-left:-2px;border-radius:50%;background:var(--ink);opacity:0.55}
-  .wspike .slabel{position:absolute;bottom:-4px;left:110px;font-family:'Caveat',cursive;
-    font-size:1.15rem;color:var(--faint)}
+  .wspike{max-width:340px}
+  .pslip{position:relative;background:var(--white);border:1px solid var(--hairline);
+    border-radius:2px;box-shadow:0 2px 6px rgba(33,37,43,0.15);padding:14px 12px 8px;
+    font-size:0.88rem;line-height:1.4}
+  .pslip + .pslip{margin-top:10px}
+  .pslip:nth-child(odd){transform:rotate(-0.8deg)}
+  .pslip:nth-child(even){transform:rotate(0.7deg);margin-left:8px}
+  .pslip::before{content:"";position:absolute;top:-5px;left:50%;width:11px;height:11px;
+    margin-left:-6px;border-radius:50%;background:var(--redpen);
+    box-shadow:0 1px 2px rgba(33,37,43,0.35)}
+  .pslip::after{content:"";position:absolute;top:-1px;left:50%;width:3px;height:7px;
+    margin-left:-2px;background:rgba(33,37,43,0.25)}
+  .wspike .slabel{font-family:'Caveat',cursive;font-size:1.15rem;color:var(--faint);
+    margin-top:8px;text-align:right}
   .whoriz{max-width:440px;padding-top:26px;margin:6px 0}
   .shelfrow{display:flex;align-items:flex-end;gap:12px;padding:0 14px}
   .hcard{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
@@ -816,10 +831,10 @@
         <div id="planList"></div>
       </section>
       <aside>
-        <h2>The board</h2>
+        <h2>Projects</h2>
         <div id="board"></div>
         <div class="diffs">
-          <h2 style="margin:28px 0 8px">Board changes</h2>
+          <h2 style="margin:0 0 8px">Board changes</h2>
           <div id="diffLatest"></div>
           <button class="take-more hidden" id="diffMoreBtn"></button>
           <div id="diffHistory" class="hidden"></div>
@@ -1338,16 +1353,11 @@
           '<div class="ftab">' + esc(P.from || "FROM THE FILE") + '</div>' +
           '<div class="flesson">' + esc(P.lesson) + '</div>' + prov + '</div>';
       case "spike": {
-        const pos = [{ top: 18, left: 60, r: -2 }, { top: 74, left: 44, r: 1.5 }, { top: 128, left: 68, r: -1 }];
         const items = asArray(P.items);
         return '<div class="wspike">' +
-          '<svg viewBox="0 0 60 190" aria-hidden="true">' +
-          '<line x1="30" y1="6" x2="30" y2="176"/>' +
-          '<ellipse cx="30" cy="180" rx="20" ry="6"/></svg>' +
-          items.slice(0, 3).map((t, n) =>
-            '<div class="spaper" style="top:' + pos[n].top + 'px;left:' + pos[n].left +
-            'px;transform:rotate(' + pos[n].r + 'deg)">' + esc(t) +
-            (n === 2 && items.length > 3 ? ' <span style="color:var(--faint)">+' + (items.length - 3) + ' more</span>' : "") +
+          items.slice(0, 4).map((t, n) =>
+            '<div class="pslip">' + esc(t) +
+            (n === 3 && items.length > 4 ? ' <span style="color:var(--faint)">+' + (items.length - 4) + ' more</span>' : "") +
             '</div>').join("") +
           '<div class="slabel">parked, on purpose</div></div>';
       }
@@ -1465,7 +1475,7 @@
       { name: "From the files", what: "An aged card surfacing one lesson from the board's own history when something recurs.",
         w: { type: "fromfiles", props: { from: "FROM THE FILE · 31 JUL",
           lesson: "Example: last launch, the feed test slipped a week — lock the test date first this time." } } },
-      { name: "The spike", what: "Parked on purpose — blue-sky and later items impaled visibly, never forgotten.",
+      { name: "The spike", what: "Parked on purpose — blue-sky and later items pinned in plain sight, never forgotten.",
         w: { type: "spike", props: { items: [
           "Example: league content strategy — the umbrella",
           "Example: club-facing delivery view prototype",
@@ -1725,289 +1735,4 @@
       }
       const replyHtml = replyingId === t.id
         ? '<div class="reply-wrap"><input data-replyinput="' + esc(t.id) + '" placeholder="Reply… (Enter to stick)"></div>'
-        : '<button class="plusbtn" data-reply="' + esc(t.id) + '" aria-label="Reply with a green sticky">+</button>';
-      const marginHtml = '<div class="marginCell">' + stackHtml + replyHtml + '</div>';
-
-      const textHtml = editingId === t.id
-        ? '<input class="edit task-size" data-edit="' + esc(t.id) + '" value="' + esc(t.text) + '">'
-        : '<div class="task-text" data-text="' + esc(t.id) + '" title="Click to edit">' + esc(t.text) + '</div>';
-
-      return '<div class="task' + (t.done ? " done" : "") + '">' +
-        '<button class="tick" data-tick="' + esc(t.id) + '" aria-label="Toggle done">' + (t.done ? "✓" : "") + '</button>' +
-        '<div class="task-body">' + textHtml +
-        '<div class="task-actions">' +
-          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("task", t.text) + '">discuss</a>' +
-          '<button class="del" data-del="' + esc(t.id) + '">delete</button>' +
-        '</div></div>' + marginHtml + '</div>';
-    }).join("") || '<p class="msg">No tasks yet — add one below.</p>';
-
-    // fronts
-    $("fronts").innerHTML = asArray(state.fronts).map(f =>
-      '<div class="front"><h3>' + esc(f.title) + '</h3>' +
-      '<div class="status">' + esc(f.status) + '</div>' +
-      (f.liveEdge ? '<div class="edge">' + esc(f.liveEdge) + '</div>' : "") +
-      '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("front", f.title) + '">discuss</a>' +
-      '</div>').join("");
-
-    // ideas
-    $("ideasList").innerHTML = currentIdeas().map(i => {
-      const threadHtml = i.thread.length
-        ? '<div class="idea-thread">' + i.thread.map(e =>
-            '<div class="idea-entry ' + (e.who === "claude" ? "claude" : "") + '">' +
-            '<span class="who">' + (e.who === "claude" ? "Claude" : "You") + '</span>' +
-            '<span class="body">' + esc(e.text) + '</span>' +
-            '<span class="ts">' + esc(fmtDateTs(e.ts)) + '</span></div>').join("") + '</div>'
-        : "";
-      const thoughtInput = thoughtingId === i.id
-        ? '<input class="note-input" data-thoughtinput="' + esc(i.id) + '" placeholder="Your thought… (Enter to save)">'
-        : "";
-      return '<div class="idea"><div class="idea-head">' +
-        '<h3>' + esc(i.title) + '</h3>' +
-        '<button class="idea-state ' + esc(i.state || "thrashing") + '" data-state="' + esc(i.id) + '" title="Click to change state">' + esc(i.state || "thrashing") + '</button>' +
-        '</div>' + threadHtml + thoughtInput +
-        '<div class="idea-actions">' +
-          '<button class="plusbtn" data-thought="' + esc(i.id) + '" aria-label="Add a thought">+</button>' +
-          '<a class="discuss" target="_blank" rel="noopener" href="' + discussUrl("idea", i.title) + '">discuss</a>' +
-          '<button class="del" data-ideadel="' + esc(i.id) + '">delete</button>' +
-        '</div></div>';
-    }).join("") || '<p class="msg" style="margin:0 0 16px;text-align:left">No ideas in play — seed one below.</p>';
-
-    // free notes
-    $("richardsNotes").innerHTML = currentFreeNotes().map((n, i) => {
-      const isEditing = editingFreeNote === i;
-      const body = isEditing
-        ? '<input class="edit note-size" data-freenoteedit="' + i + '" value="' + esc(n.text) + '">'
-        : '<span class="note-text" data-freenotetext="' + i + '" title="Click to edit">' + esc(n.text) + '</span>' +
-          '<button class="note-del" data-freenotedel="' + i + '" aria-label="Delete note">×</button>';
-      return '<p><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' + body + '</p>';
-    }).join("");
-
-    wire();
-    show("app");
-  }
-
-  function wire(){
-    document.querySelectorAll("[data-tick]").forEach(b => b.onclick = () => toggleDone(b.dataset.tick));
-    document.querySelectorAll("[data-text]").forEach(el =>
-      el.onclick = () => { editingId = el.dataset.text; render(); });
-    document.querySelectorAll("[data-del]").forEach(b => b.onclick = () => deleteTask(b.dataset.del));
-    document.querySelectorAll("[data-reply]").forEach(b =>
-      b.onclick = () => { replyingId = b.dataset.reply; render(); });
-
-    document.querySelectorAll("[data-stack]").forEach(el =>
-      el.onclick = e => {
-        if (e.target.closest("button,input")) return;    // controls don't toggle
-        const id = el.dataset.stack;
-        expandedId = expandedId === id ? null : id;
-        editingEntry = null;
-        render();
-      });
-    document.querySelectorAll("[data-entrytext]").forEach(b =>
-      b.onclick = () => { const [tid, i] = b.dataset.entrytext.split(":");
-        editingEntry = { taskId: tid, idx: +i }; render(); });
-    document.querySelectorAll("[data-entrydel]").forEach(b =>
-      b.onclick = () => { const [tid, i] = b.dataset.entrydel.split(":"); deleteEntry(tid, +i); });
-
-    document.querySelectorAll("[data-state]").forEach(b => b.onclick = () => cycleState(b.dataset.state));
-    document.querySelectorAll("[data-ideadel]").forEach(b => b.onclick = () => deleteIdea(b.dataset.ideadel));
-    document.querySelectorAll("[data-thought]").forEach(b =>
-      b.onclick = () => { thoughtingId = b.dataset.thought; render(); });
-    document.querySelectorAll("[data-freenotetext]").forEach(el =>
-      el.onclick = () => { editingFreeNote = +el.dataset.freenotetext; render(); });
-    document.querySelectorAll("[data-freenotedel]").forEach(b =>
-      b.onclick = () => deleteFreeNote(+b.dataset.freenotedel));
-
-    // single-commit inputs (Enter and blur can otherwise both fire around a re-render)
-    function once(inp, save, cancel){
-      let done = false;
-      const commit = () => { if (done) return; done = true;
-        inp.onblur = null; inp.onkeydown = null; save(inp.value); };
-      inp.onkeydown = e => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") { if (done) return; done = true;
-          inp.onblur = null; inp.onkeydown = null; cancel(); }
-      };
-      inp.onblur = commit;
-    }
-    document.querySelectorAll("[data-edit]").forEach(inp => {
-      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
-      once(inp, v => saveText(inp.dataset.edit, v), () => { editingId = null; render(); });
-    });
-    document.querySelectorAll("[data-replyinput]").forEach(inp => {
-      inp.focus();
-      once(inp, v => addReply(inp.dataset.replyinput, v), () => { replyingId = null; render(); });
-    });
-    document.querySelectorAll("[data-entryedit]").forEach(inp => {
-      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
-      const [tid, i] = inp.dataset.entryedit.split(":");
-      once(inp, v => saveEntryEdit(tid, +i, v), () => { editingEntry = null; render(); });
-    });
-    document.querySelectorAll("[data-thoughtinput]").forEach(inp => {
-      inp.focus();
-      once(inp, v => addThought(inp.dataset.thoughtinput, v), () => { thoughtingId = null; render(); });
-    });
-    document.querySelectorAll("[data-freenoteedit]").forEach(inp => {
-      inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
-      const i = +inp.dataset.freenoteedit;
-      once(inp, v => saveFreeNoteEdit(i, v), () => { editingFreeNote = null; render(); });
-    });
-  }
-
-  function discussUrl(kind, title){
-    const prompt = "Walk judgement focus — " + kind + ': "' + title + '". ' +
-      "Read the walk reference first, then give me focused judgement and advice on this specific " +
-      kind + ", and update its annotation in the reference.";
-    return "https://claude.ai/new?q=" + encodeURIComponent(prompt);
-  }
-
-  /* ---------- Mark It ---------- */
-  const REVIEW_URL = "https://morning-walks-419435526393.europe-west1.run.app/review/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
-  let toastTimer;
-  function toast(msg, ms){
-    const t = $("toast");
-    t.textContent = msg; t.classList.add("on");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3500);
-  }
-  /* ---------- auto-mark bar ---------- */
-  const RUN_MINUTE = 36;   // the scheduled task fires at :36 past each hour — update if the schedule changes
-  let reviewState = null;
-  setInterval(() => {
-    const el = $("cdTimer"); if (!el) return;
-    const now = new Date();
-    const next = new Date(now);
-    next.setMinutes(RUN_MINUTE, 0, 0);
-    if (next <= now) next.setHours(next.getHours() + 1);
-    const secs = Math.floor((next - now) / 1000);
-    el.textContent = String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
-  }, 1000);
-
-  async function sha256hex(str){
-    const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
-  }
-  // must mirror the server's v2Signature exactly
-  async function clientSignature(){
-    const notes = asArray(state?.notes).filter(n => n.state === "open")
-      .map(n => ({ id: n.id, text: n.text }));
-    const done = {};
-    asArray(state?.projects).forEach(p => asArray(p.actions).forEach(a => { done[a.id] = !!a.done; }));
-    return sha256hex(JSON.stringify({ notes, done, date: state?.plan?.date || "" }));
-  }
-  async function updateMarkEst(){
-    const el = $("markEst"); if (!el || !state || !state.projects) return;
-    try {
-      const sig = await clientSignature();
-      if (reviewState && reviewState.sig === sig) {
-        el.textContent = "free — nothing new to judge (auto run will skip too)";
-        return;
-      }
-      let countTxt = "";
-      if (reviewState && reviewState.basis) {
-        const b = reviewState.basis; let c = 0;
-        const doneNow = {};
-        asArray(state.projects).forEach(p => asArray(p.actions).forEach(a => { doneNow[a.id] = !!a.done; }));
-        new Set([...Object.keys(doneNow), ...Object.keys(b.done || {})]).forEach(id => {
-          if (!!doneNow[id] !== !!(b.done || {})[id]) c++;
-        });
-        const openNow = asArray(state.notes).filter(n => n.state === "open");
-        const nowHashes = {};
-        for (const n of openNow) nowHashes[n.id] = await sha256hex(String(n.text || ""));
-        new Set([...Object.keys(nowHashes), ...Object.keys(b.notes || {})]).forEach(id => {
-          if (nowHashes[id] !== (b.notes || {})[id]) c++;
-        });
-        if ((state.plan?.date || "") !== (b.date || "")) c++;
-        if (c) countTxt = c + " change" + (c > 1 ? "s" : "") + " waiting \u00b7 ";
-      }
-      const ctx = { ...state };
-      delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
-      delete ctx.ideas; delete ctx.claudesTake;
-      const tokens = JSON.stringify(ctx).length / 4 + 500;
-      const pence = Math.max(1, Math.round((tokens * 3e-6 + 500 * 15e-6) * 79));
-      el.textContent = countTxt + "\u2248 " + pence + "p \u00b7 or wait for the free run";
-    } catch { el.textContent = ""; }
-  }
-  $("markNowBtn").addEventListener("click", () => {
-    const b = $("markNowBtn"); b.disabled = true;
-    $("markBtn").click();
-    setTimeout(() => { b.disabled = false; }, 4000);
-  });
-
-  /* ---------- spend meter ---------- */
-  function renderSpend(u){
-    const el = $("spendTally");
-    if (!u || !u.calls) { el.textContent = ""; return; }
-    const usd = (u.inTok || 0) * 3 / 1e6 + (u.outTok || 0) * 15 / 1e6;
-    const since = u.since ? new Date(u.since) : null;
-    el.textContent = "\u2248 $" + usd.toFixed(2) + " used \u00b7 " + u.calls + " calls" +
-      (since && !isNaN(since) ? " since " + since.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" }) : "");
-  }
-
-  /* ---------- Tools: /assist ---------- */
-  const ASSIST_URL = "https://morning-walks-419435526393.europe-west1.run.app/assist/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
-  async function runAssist(fn, input, statusEl, outEl, headEl, btn){
-    const user = firebase.auth().currentUser;
-    if (!user) { statusEl.textContent = "sign in first"; return; }
-    btn.disabled = true;
-    statusEl.textContent = "drafting…";
-    try {
-      const token = await user.getIdToken();
-      const r = await fetch(ASSIST_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json", "authorization": "Bearer " + token },
-        body: JSON.stringify({ function: fn, input: input })
-      });
-      const text = await r.text();
-      if (!r.ok) throw new Error(text || ("HTTP " + r.status));
-      outEl.textContent = text;
-      outEl.classList.remove("hidden");
-      headEl.classList.remove("hidden");
-      statusEl.textContent = "";
-    } catch (e) {
-      statusEl.textContent = "failed: " + (e.message || e).slice(0, 120);
-    }
-    btn.disabled = false;
-  }
-  $("composeBtn").addEventListener("click", () => {
-    const input = $("composeInput").value.trim();
-    if (!input) { $("composeStatus").textContent = "give it some context first"; return; }
-    runAssist("compose_email", input, $("composeStatus"), $("composeOutput"),
-      $("composeOutHead"), $("composeBtn"));
-  });
-  $("composeCopy").addEventListener("click", () => {
-    navigator.clipboard.writeText($("composeOutput").textContent)
-      .then(() => toast("Draft copied."))
-      .catch(() => toast("Copy failed — select and copy manually."));
-  });
-
-  $("markBtn").addEventListener("click", async () => {
-    const btn = $("markBtn");
-    btn.disabled = true;
-    toast("Asking Claude to mark the board…", 8000);
-    try {
-      const r = await fetch(REVIEW_URL, { method: "POST" });
-      const text = await r.text();
-      if (r.ok) toast(text || "Marked — watch the margin.");
-      else throw new Error(text || ("HTTP " + r.status));
-    } catch (e) {
-      toast("Reviewer not live — opening a Claude chat instead.");
-      window.open("https://claude.ai/new?q=" + encodeURIComponent(
-        "Run a walk judgement: read the walk reference, judge the day's shape, reply into any stacks and idea threads where the last word was mine, and write it all back."),
-        "_blank", "noopener");
-    }
-    btn.disabled = false;
-  });
-
-  function fmtTs(ts){
-    if (!ts) return "";
-    const d = new Date(ts);
-    return isNaN(d) ? String(ts) : d.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
-  }
-  function fmtDateTs(ts){
-    if (!ts) return "";
-    const d = new Date(ts);
-    return isNaN(d) ? "" : d.toLocaleString("en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
-  }
-</script>
-</body>
-</html>
+        : '<button class="plu
