@@ -1,9 +1,15 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v114.0 — 02/08/2026
+  v114.1 — 02/08/2026
 
   Changelog:
+  v114.1 — Pure fix; supersedes v114.0. The wall was the mass, not the
+          colour: the tray was stacking the entire resolved-note history
+          under the composer — seven filed stickies before anything
+          actionable. Resolved notes now sit behind a one-line "filed · n"
+          toggle, hidden by default; the tray shows open notes only. With
+          nothing open, the whole thing is a tab and one input line.
   v114.0 — In-tray, not a wall. Supersedes v113.0. The inbox loses its
           solid green slab: now a white tray with a small green IN TRAY
           tab (kin to the talking-points divider), a one-line composer
@@ -421,6 +427,9 @@
   .inbox .composer textarea:focus{min-height:76px}
   .inbox #notesV2{margin-top:8px}
   .inbox #notesV2:empty{margin-top:0}
+  .filedToggle{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;letter-spacing:0.08em;
+    text-transform:uppercase;color:var(--faint);background:none;border:none;cursor:pointer;
+    padding:0;margin-top:6px;display:block}
 
   /* auto-mark bar */
   .autobar{display:flex;align-items:center;gap:16px;flex-wrap:wrap;
@@ -849,6 +858,7 @@
   let armedDecision = null;    // "widgetIndex:option" awaiting confirm tap
   let takeCollapsed = (function(){ try { return localStorage.getItem("takeCollapsed") !== "0"; }
     catch(e){ return true; } })();   // collapsed by default; preference survives reloads
+  let showFiled = false;           // resolved notes hidden by default — the tray is for open items
 
   const IDEA_STATES = ["thrashing", "parked", "graduated"];
 
@@ -1532,11 +1542,16 @@
           '<div class="srow"><span class="ts">' + esc(fmtDateTs(n.ts)) + '</span>' +
           '<button class="sbtn" data-notetext="' + esc(n.id) + '">edit</button>' +
           '<button class="sbtn" data-notedel="' + esc(n.id) + '">×</button></div></div>';
-      }).join("") +
-      notes.filter(n => n.state !== "open").map(n =>
-        '<div class="noteRes"><div class="orig">' + esc(n.text) + '</div>' +
-        '<div class="resol">↳ ' + esc(n.resolution?.text || "resolved") +
-        '<span class="ts">' + esc(fmtDateTs(n.resolution?.ts)) + '</span></div></div>').join("");
+      }).join("") + (function(){
+        const res = notes.filter(n => n.state !== "open");
+        if (!res.length) return "";
+        return '<button class="filedToggle" data-filedtoggle>' +
+          (showFiled ? "hide filed" : "filed · " + res.length) + '</button>' +
+          (showFiled ? res.map(n =>
+            '<div class="noteRes"><div class="orig">' + esc(n.text) + '</div>' +
+            '<div class="resol">↳ ' + esc(n.resolution?.text || "resolved") +
+            '<span class="ts">' + esc(fmtDateTs(n.resolution?.ts)) + '</span></div></div>').join("") : "");
+      })();
 
     // board — projects in authored order; actions now → soon → later, done sink
     $("board").innerHTML = asArray(state.projects).map(p => {
@@ -1588,6 +1603,8 @@
       b.onclick = () => answerDecision(+b.dataset.wanswer, b.dataset.opt));
     document.querySelectorAll("[data-notetext]").forEach(b =>
       b.onclick = () => { editingNoteId = b.dataset.notetext; render(); });
+    document.querySelectorAll("[data-filedtoggle]").forEach(b =>
+      b.onclick = () => { showFiled = !showFiled; render(); });
     document.querySelectorAll("[data-notedel]").forEach(b =>
       b.onclick = () => deleteNoteV2(b.dataset.notedel));
     document.querySelectorAll("[data-noteedit]").forEach(ta => {
