@@ -1,8 +1,19 @@
 /*
   MORNING WALK — MCP SERVER + AMBIENT REVIEWER
-  v65.0 — 01/08/2026
+  v114.0 — 03/08/2026
+  (Supersedes v78 / v82 / v87 / v88 / v90 / v94 — deploy this one; earlier
+   server files from this build are obsolete. See VERSIONING.md.)
 
   Changelog:
+  v114.0 — Concurrency-safe writes. New patch_reference tool applies small
+           surgical ops (tickAction, setUrgency, appendNote, resolveNote,
+           appendRichardNote, setPlan, appendDiff) to the FRESHLY-READ live
+           board rather than a stale snapshot — so a mid-day edit can never
+           clobber a desk-app or scheduled write. update_reference (the daily
+           full compile) gains an optional expectedLastUpdated guard that
+           refuses the write if the board moved since the caller read it.
+           Notes remain append-only: no patch op deletes or rewrites an
+           existing note. Fixes the eaten-tick defect (a26).
   v94.0 — reviewState carries a basis (tick map + per-open-note hashes +
           plan date) alongside the signature, so the desk app can count
           exactly how many changes are waiting since the last mark.
@@ -92,7 +103,7 @@ function recordUsage(u) {
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "65.0" });
+  const server = new McpServer({ name: "walk-reference", version: "114.0" });
 
   server.tool(
     "get_reference",
@@ -107,9 +118,12 @@ function buildServer() {
 
   server.tool(
     "update_reference",
-    "Write the complete new state of the rolling reference (post-walk compile or mid-day edit). Pass the ENTIRE document as a JSON string — replaces the node wholesale; previous state is archived automatically and meta.lastUpdated/updatedBy are stamped by the server. v2 schema: notes[], projects[] (each with actions: id/text/urgency/done/provenance), plan {date, actionIds}, take, diffs[] — legacy mirror keys (fronts, todaysPlan) accepted during transition. Refused if notes, projects or plan are missing.",
-    { referenceJson: z.string().describe("Full reference document as a JSON string") },
-    async ({ referenceJson }) => {
+    "Write the complete new state of the rolling reference — use for the DAILY COMPILE (a full rewrite), NOT for small mid-day edits (use patch_reference for those). Pass the ENTIRE document as a JSON string — replaces the node wholesale; previous state is archived automatically and meta.lastUpdated/updatedBy are stamped by the server. v2 schema: notes[], projects[] (each with actions: id/text/urgency/done/provenance), plan {date, actionIds}, take, diffs[] — legacy mirror keys (fronts, todaysPlan) accepted during transition. Refused if notes, projects or plan are missing. OPTIONAL CONFLICT GUARD: pass expectedLastUpdated (the meta.lastUpdated value you saw when you read the board); if the live board has moved since, the write is refused so you can re-read rather than clobber a desk-app or scheduled edit.",
+    {
+      referenceJson: z.string().describe("Full reference document as a JSON string"),
+      expectedLastUpdated: z.string().optional().describe("The meta.lastUpdated you read; write is refused if the live board has moved past it")
+    },
+    async ({ referenceJson, expectedLastUpdated }) => {
       let next;
       try { next = JSON.parse(referenceJson); }
       catch (e) { return { content: [{ type: "text", text: "ERROR: invalid JSON — " + e.message }] }; }
@@ -117,6 +131,17 @@ function buildServer() {
         return { content: [{ type: "text", text: "ERROR: refused — v2 payload must contain 'notes', 'projects' and 'plan'. Unknown/legacy keys (fronts, todaysPlan mirrors) are accepted. Node unchanged." }] };
 
       const current = await db.ref(NODE).get();
+
+      // Conflict guard: if caller told us what they read, refuse when the board has moved on.
+      if (expectedLastUpdated && current.exists()) {
+        const liveStamp = current.val()?.meta?.lastUpdated || "";
+        if (liveStamp && liveStamp !== expectedLastUpdated) {
+          return { content: [{ type: "text", text:
+            "CONFLICT: the board moved since you read it (live meta.lastUpdated=" + liveStamp +
+            ", you expected " + expectedLastUpdated + "). Nothing written — re-read with get_reference and re-apply your change." }] };
+        }
+      }
+
       if (current.exists()) await db.ref(HISTORY + "/" + Date.now()).set(current.val());
 
       next.meta = next.meta || {};
@@ -124,6 +149,142 @@ function buildServer() {
       next.meta.updatedBy = "claude";
       await db.ref(NODE).set(next);
       return { content: [{ type: "text", text: "OK: reference updated at " + next.meta.lastUpdated + " (previous state archived)." }] };
+    }
+  );
+
+  server.tool(
+    "patch_reference",
+    "Apply SMALL, SURGICAL edits to the board without rewriting the whole document — use this for every mid-day change (tick an action, append a note, add a diff, change an urgency). Concurrency-safe: it reads the board fresh, applies only your listed operations to the live state, and writes back — so it can never clobber a desk-app or scheduled edit the way a full-document write can. Operations are applied in order. Supported ops:\n" +
+    "  { op:'tickAction', actionId:'a3', done:true }  — set an action's done flag\n" +
+    "  { op:'setUrgency', actionId:'a5', urgency:'now' }  — change an action's urgency (now|soon|later)\n" +
+    "  { op:'appendNote', text:'...', anchor:'sam' }  — add a NEW open note (server assigns id + ISO ts). anchor optional. NEVER rewrites existing notes.\n" +
+    "  { op:'resolveNote', noteId:'n7', text:'answered — ...' }  — mark an open note resolved with a one-line resolution (server stamps ts + links a diff)\n" +
+    "  { op:'appendRichardNote', text:'...' }  — add to richardsNotes (server stamps ts)\n" +
+    "  { op:'setPlan', date:'04/08/2026', actionIds:['a2','a4'] }  — replace today's plan actionIds/date\n" +
+    "  { op:'appendDiff', what:'...', why:'...' }  — add a diff entry (server assigns id + ts)\n" +
+    "Notes are append-only; there is no op that deletes or rewrites an existing note's text. Returns the new meta.lastUpdated.",
+    {
+      ops: z.string().describe("JSON array of operation objects, applied in order (see tool description for shapes)"),
+      expectedLastUpdated: z.string().optional().describe("Optional: the meta.lastUpdated you last saw; if set and the board has moved, the patch is still applied safely to live state, but the response flags that the board had changed")
+    },
+    async ({ ops, expectedLastUpdated }) => {
+      let operations;
+      try { operations = JSON.parse(ops); }
+      catch (e) { return { content: [{ type: "text", text: "ERROR: invalid ops JSON — " + e.message }] }; }
+      if (!Array.isArray(operations) || !operations.length)
+        return { content: [{ type: "text", text: "ERROR: ops must be a non-empty JSON array." }] };
+
+      // Read the LIVE board — patches always apply to current state, never a stale snapshot.
+      const snap = await db.ref(NODE).get();
+      if (!snap.exists()) return { content: [{ type: "text", text: "ERROR: /walkReference is empty — nothing to patch." }] };
+      const ref = snap.val();
+      const priorStamp = ref?.meta?.lastUpdated || "";
+      const now = new Date().toISOString();
+
+      const findAction = id => {
+        for (const p of asArray(ref.projects)) {
+          for (const a of asArray(p.actions)) if (a.id === id) return a;
+        }
+        return null;
+      };
+      const nextNoteId = () => {
+        const ids = asArray(ref.notes).map(n => String(n.id));
+        let n = ids.length + 1;
+        while (ids.includes("n" + n)) n++;
+        return "n" + n;
+      };
+
+      const applied = [];
+      const errors = [];
+      let pendingDiffId = null;
+
+      for (let i = 0; i < operations.length; i++) {
+        const o = operations[i] || {};
+        try {
+          switch (o.op) {
+            case "tickAction": {
+              const a = findAction(o.actionId);
+              if (!a) { errors.push("op " + i + ": action " + o.actionId + " not found"); break; }
+              a.done = o.done !== false;
+              applied.push("tick " + o.actionId + "=" + a.done);
+              break;
+            }
+            case "setUrgency": {
+              const a = findAction(o.actionId);
+              if (!a) { errors.push("op " + i + ": action " + o.actionId + " not found"); break; }
+              if (!["now", "soon", "later"].includes(o.urgency)) { errors.push("op " + i + ": bad urgency"); break; }
+              a.urgency = o.urgency;
+              applied.push("urgency " + o.actionId + "=" + o.urgency);
+              break;
+            }
+            case "appendNote": {
+              if (!o.text) { errors.push("op " + i + ": appendNote needs text"); break; }
+              ref.notes = asArray(ref.notes);
+              const note = { id: nextNoteId(), text: String(o.text), state: "open", ts: now };
+              if (o.anchor) note.anchor = String(o.anchor);
+              ref.notes.push(note);
+              applied.push("note+ " + note.id);
+              break;
+            }
+            case "resolveNote": {
+              if (!o.noteId || !o.text) { errors.push("op " + i + ": resolveNote needs noteId+text"); break; }
+              const note = asArray(ref.notes).find(n => n.id === o.noteId);
+              if (!note) { errors.push("op " + i + ": note " + o.noteId + " not found"); break; }
+              if (note.state === "resolved") { errors.push("op " + i + ": note " + o.noteId + " already resolved"); break; }
+              if (!pendingDiffId) pendingDiffId = "d" + (asArray(ref.diffs).length + 1);
+              note.state = "resolved";
+              note.resolution = { ts: now, text: String(o.text), diffId: pendingDiffId };
+              applied.push("resolve " + o.noteId);
+              break;
+            }
+            case "appendRichardNote": {
+              if (!o.text) { errors.push("op " + i + ": appendRichardNote needs text"); break; }
+              ref.richardsNotes = asArray(ref.richardsNotes);
+              ref.richardsNotes.push({ text: String(o.text), ts: now });
+              applied.push("richardNote+");
+              break;
+            }
+            case "setPlan": {
+              ref.plan = ref.plan || {};
+              if (o.date) ref.plan.date = String(o.date);
+              if (Array.isArray(o.actionIds)) ref.plan.actionIds = o.actionIds.map(String);
+              applied.push("plan set");
+              break;
+            }
+            case "appendDiff": {
+              if (!o.what) { errors.push("op " + i + ": appendDiff needs what"); break; }
+              const diffs = asArray(ref.diffs);
+              const id = pendingDiffId || ("d" + (diffs.length + 1));
+              diffs.push({ id, ts: now, changes: [{ what: String(o.what), why: String(o.why || "mid-day patch") }] });
+              ref.diffs = diffs.slice(-8);
+              applied.push("diff+ " + id);
+              break;
+            }
+            default:
+              errors.push("op " + i + ": unknown op '" + o.op + "'");
+          }
+        } catch (e) {
+          errors.push("op " + i + ": " + e.message);
+        }
+      }
+
+      if (!applied.length) {
+        return { content: [{ type: "text", text: "ERROR: no operations applied. " + errors.join("; ") }] };
+      }
+
+      // Archive prior state, stamp, and write back the (freshly-read, now-mutated) board.
+      await db.ref(HISTORY + "/" + Date.now()).set(snap.val());
+      ref.meta = ref.meta || {};
+      ref.meta.lastUpdated = now;
+      ref.meta.updatedBy = "claude";
+      await db.ref(NODE).set(ref);
+
+      const moved = expectedLastUpdated && priorStamp && priorStamp !== expectedLastUpdated;
+      return { content: [{ type: "text", text:
+        "OK: patched at " + now + " — " + applied.join(", ") +
+        (errors.length ? " | SKIPPED: " + errors.join("; ") : "") +
+        (moved ? " | NOTE: board had moved since you last read it (was " + expectedLastUpdated + ", found " + priorStamp + ") — your patch applied safely to the live state." : "") +
+        " (previous state archived)." }] };
     }
   );
 
