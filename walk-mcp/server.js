@@ -1,10 +1,25 @@
 /*
   MORNING WALK — MCP SERVER + AMBIENT REVIEWER
-  v114.0 — 03/08/2026
-  (Supersedes v78 / v82 / v87 / v88 / v90 / v94 — deploy this one; earlier
-   server files from this build are obsolete. See VERSIONING.md.)
+  v115.0 — 03/08/2026
+  (Supersedes v78 / v82 / v87 / v88 / v90 / v94 / v114 — deploy this one;
+   earlier server files from this build are obsolete. See VERSIONING.md.)
 
   Changelog:
+  v115.0 — The light-file pass. patch_reference gains addAction (create an
+           action under a project, server-assigned id, optional drop onto
+           today's plan) and setTake (replace the take in one op) — so a
+           mid-day or scheduled run can FILE a note into an action and state
+           what it did without a full-document write. addAction + resolveNote
+           in one call is atomic (fixes "resolved but no action created").
+           Notes gain a 'parked' state (open = file me, parked = live trigger
+           skip me, resolved = done): appendNote accepts state:'parked' and a
+           new setNoteState op moves open<->parked (never touches resolved).
+           New meta.directive field (setDirective op) is the single file-held
+           instruction naming which mode the automation runs (file | tidy |
+           off) — the hourly task, the chat trigger and the desk button all
+           read it, so behaviour changes by editing the board, not the prompt.
+           Change-detection unchanged: only OPEN notes count, so parked
+           triggers never wake a review.
   v114.0 — Concurrency-safe writes. New patch_reference tool applies small
            surgical ops (tickAction, setUrgency, appendNote, resolveNote,
            appendRichardNote, setPlan, appendDiff) to the FRESHLY-READ live
@@ -103,7 +118,7 @@ function recordUsage(u) {
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "114.0" });
+  const server = new McpServer({ name: "walk-reference", version: "115.0" });
 
   server.tool(
     "get_reference",
@@ -162,6 +177,11 @@ function buildServer() {
     "  { op:'appendRichardNote', text:'...' }  — add to richardsNotes (server stamps ts)\n" +
     "  { op:'setPlan', date:'04/08/2026', actionIds:['a2','a4'] }  — replace today's plan actionIds/date\n" +
     "  { op:'appendDiff', what:'...', why:'...' }  — add a diff entry (server assigns id + ts)\n" +
+    "  { op:'addAction', projectId:'dazn', text:'...', urgency:'now', provenance:['...'], toPlan:true }  — create a NEW action under a project (server assigns the id; urgency defaults now; toPlan drops it onto today's plan). Batch with resolveNote in the SAME call to file a note into an action atomically.\n" +
+    "  { op:'setTake', text:'...' }  — replace the take with a single fresh entry (state what this pass did)\n" +
+    "  { op:'appendNote', text:'...', state:'parked' }  — appendNote also accepts state:'parked' to file a live-trigger note that a file pass skips\n" +
+    "  { op:'setNoteState', noteId:'n7', state:'parked' }  — move a note between open (file me) and parked (live trigger, skip me); cannot touch a resolved note\n" +
+    "  { op:'setDirective', directive:'file' }  — set meta.directive, the single file-held instruction naming which mode the automation runs (file | tidy | off)\n" +
     "Notes are append-only; there is no op that deletes or rewrites an existing note's text. Returns the new meta.lastUpdated.",
     {
       ops: z.string().describe("JSON array of operation objects, applied in order (see tool description for shapes)"),
@@ -193,6 +213,17 @@ function buildServer() {
         while (ids.includes("n" + n)) n++;
         return "n" + n;
       };
+      const findProject = id => asArray(ref.projects).find(p => p.id === id) || null;
+      const nextActionId = () => {
+        // Highest existing aN across ALL projects + 1, so ids never collide even
+        // if a project was deleted or actions were moved between projects.
+        let max = 0;
+        asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
+          const m = /^a(\d+)$/.exec(String(a.id));
+          if (m) max = Math.max(max, parseInt(m[1], 10));
+        }));
+        return "a" + (max + 1);
+      };
 
       const applied = [];
       const errors = [];
@@ -219,11 +250,12 @@ function buildServer() {
             }
             case "appendNote": {
               if (!o.text) { errors.push("op " + i + ": appendNote needs text"); break; }
+              const st = o.state === "parked" ? "parked" : "open";
               ref.notes = asArray(ref.notes);
-              const note = { id: nextNoteId(), text: String(o.text), state: "open", ts: now };
+              const note = { id: nextNoteId(), text: String(o.text), state: st, ts: now };
               if (o.anchor) note.anchor = String(o.anchor);
               ref.notes.push(note);
-              applied.push("note+ " + note.id);
+              applied.push("note+ " + note.id + (st === "parked" ? " (parked)" : ""));
               break;
             }
             case "resolveNote": {
@@ -258,6 +290,62 @@ function buildServer() {
               diffs.push({ id, ts: now, changes: [{ what: String(o.what), why: String(o.why || "mid-day patch") }] });
               ref.diffs = diffs.slice(-8);
               applied.push("diff+ " + id);
+              break;
+            }
+            case "addAction": {
+              // Create a NEW action under an existing project. Server assigns the id.
+              // Batch with resolveNote in the same ops array to file a note into an
+              // action as ONE atomic write (kills the "resolved but no action created" defect).
+              if (!o.projectId || !o.text) { errors.push("op " + i + ": addAction needs projectId+text"); break; }
+              const proj = findProject(o.projectId);
+              if (!proj) { errors.push("op " + i + ": project " + o.projectId + " not found"); break; }
+              const urgency = ["now", "soon", "later"].includes(o.urgency) ? o.urgency : "now";
+              const id = nextActionId();
+              const action = {
+                id, text: String(o.text), urgency, done: false,
+                provenance: (Array.isArray(o.provenance) ? o.provenance.map(String) : [])
+              };
+              proj.actions = asArray(proj.actions);
+              proj.actions.push(action);
+              // Optionally drop onto today's plan (end of the list).
+              if (o.toPlan) {
+                ref.plan = ref.plan || {};
+                ref.plan.actionIds = asArray(ref.plan.actionIds).map(String);
+                if (!ref.plan.actionIds.includes(id)) ref.plan.actionIds.push(id);
+              }
+              applied.push("action+ " + id + "@" + o.projectId + (o.toPlan ? " (on plan)" : ""));
+              break;
+            }
+            case "setTake": {
+              // Replace the take with a single fresh entry — lets a run state what it did
+              // instead of filing silently or forcing a full-document write for two lines.
+              if (!o.text) { errors.push("op " + i + ": setTake needs text"); break; }
+              ref.take = [{ ts: now, text: String(o.text) }];
+              applied.push("take set");
+              break;
+            }
+            case "setNoteState": {
+              // Move a note between open and parked. 'parked' = live trigger, skip me on a
+              // file pass; 'open' = file me. Resolving is resolveNote's job (it stamps a diff).
+              if (!o.noteId || !["open", "parked"].includes(o.state)) {
+                errors.push("op " + i + ": setNoteState needs noteId + state(open|parked)"); break;
+              }
+              const note = asArray(ref.notes).find(n => n.id === o.noteId);
+              if (!note) { errors.push("op " + i + ": note " + o.noteId + " not found"); break; }
+              if (note.state === "resolved") { errors.push("op " + i + ": note " + o.noteId + " is resolved — cannot reopen"); break; }
+              note.state = o.state;
+              applied.push("note " + o.noteId + "=" + o.state);
+              break;
+            }
+            case "setDirective": {
+              // The single file-held instruction naming which mode the automation runs:
+              // 'file' (light hourly file pass), 'tidy'/'compile' (full pass), or 'off'.
+              // The xx:36 task, the chat trigger and the desk button all read this — so
+              // behaviour changes by editing the BOARD, never the task prompt.
+              if (o.directive === undefined || o.directive === null) { errors.push("op " + i + ": setDirective needs directive"); break; }
+              ref.meta = ref.meta || {};
+              ref.meta.directive = String(o.directive);
+              applied.push("directive=" + ref.meta.directive);
               break;
             }
             default:
