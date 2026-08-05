@@ -1,9 +1,55 @@
 <!DOCTYPE html>
 <!--
   MORNING WALK — DESK COMPANION
-  v117.0 — 02/08/2026
+  v118.0 — 05/08/2026
 
   Changelog:
+  v118.0 — Board architecture redesign (v3 spec, a64). Supersedes v117.0.
+          Requires server v116 for the new ops; renders read-only-ish on
+          v115 (the desk's own writes are path-scoped and don't need it).
+          THE TEST OF SUCCESS: when something new arrives there is exactly
+          one right place for it, and it's obvious. Three object types are
+          now separated and never bleed into each other —
+            TASKS do (title + body, a status, an update log, ownership,
+              subtasks, dependency links; if it can be ticked it's a task),
+            PROJECTS think (a binder with a rolling summary; NO tick boxes,
+              ever; a project stands on its own even with nothing live), and
+            WIDGETS present (they own no data; they point at a task or a
+              project and render it a particular way).
+          Page is three bands top to bottom: widgets, buckets, binders.
+          BUCKETS: On the agenda → In progress → Done, with In progress
+          split in two because they are different signals — "In progress
+          (mine)" means act, "Waiting" means chase. They are visually
+          distinct (moss rule vs amber field) and drag-and-drop refiles
+          across all four; ‹ › move buttons do the same by touch. Bucket is
+          derived where a board hasn't been refiled yet: blocked by an
+          unfinished predecessor, or a primary owner who isn't Richard,
+          both read as Waiting.
+          TASK MID-STATE: the tick cycles open → part → done. 'part' is an
+          amber half-filled checkbox — not done, but legitimately in flight.
+          "+ update" attaches a progress note WITHOUT a tick and surfaces
+          the latest one on the card; the whole log expands underneath.
+          OWNERSHIP: initials in a circle beside the task, and beside the
+          specific subtask, so you can see whose ball each thing is. Layered
+          — one primary (moss = mine, amber = theirs) plus dashed secondary
+          associates. Tapping the circle hands the task over: the a65 case
+          (the last 24 portals bouncing Tom → Richard) is one tap, not a
+          refile.
+          BINDERS: a shelf of spines you flick through, then the cards
+          themselves — title, state, rolling summary, live counts and a
+          recently-done shelf. No ticks anywhere in the band.
+          Q&A: a conversations panel with an open-questions badge. A question
+          is never silently resolved — it stays open, ageing in red, until an
+          answer is written into its thread. "Answer open questions" is an
+          on-demand pass (server /answer); the silent hourly file pass has no
+          channel to reply and never touches them.
+          NEW/CHANGED WIDGETS: today's must-lands strip; chase radar (what's
+          waiting on someone else and for how long); recently-done ribbon
+          (completed work stays visible); open-question card; and the month
+          grid replaced by an AGENDA STRIP — today's fixed points with times,
+          the next few days, countdown feel baked in. Invoked widgets carry
+          an expiry and leave the shelf when they pass. Palette gallery grown
+          to nineteen.
   v117.0 — Level desk. Supersedes v116.0. Top widgets move from flex to a
           fluid grid (auto-fit, minmax 290px) so widths are percentages of
           the row, columns align, nothing overhangs and wrapping stops
@@ -465,8 +511,8 @@
 
   main > section{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
     padding:18px 18px 14px;align-self:start}
-  main aside .diffs{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
-    padding:16px 18px 14px;margin-top:30px}
+  main aside .diffs,.band .diffs{background:var(--white);border:1px solid var(--hairline);
+    border-radius:2px;padding:16px 18px 14px;margin-top:30px}
   #wTop{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));
     gap:26px 24px;align-items:start;margin:14px 0 10px}
   #wTop > *{margin:0;max-width:100%;min-width:0}
@@ -729,6 +775,249 @@
   .tool-output-head .copybtn{font:inherit;font-size:0.8rem;color:var(--faint);background:none;
     border:none;cursor:pointer;padding:0}
   .tool-output-head .copybtn:hover{color:var(--ink)}
+
+  /* ============ v118 — three bands (board architecture redesign, v3) ============
+     Band 1 widgets present · band 2 buckets do · band 3 binders think.
+     Nothing bleeds between the layers: widgets own no data, buckets hold the
+     only tick boxes on the page, binders never carry one. */
+  .band{margin-top:38px}
+  .band > h2{display:flex;align-items:baseline;gap:10px;margin-bottom:14px}
+  .band > h2 em{font-style:normal;font-weight:400;text-transform:none;letter-spacing:0;
+    font-size:0.8rem;color:var(--hairline)}
+  .band > h2 em{color:var(--faint);opacity:0.75}
+
+  /* --- band 2: the buckets --- */
+  .buckets{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start}
+  @media(max-width:980px){.buckets{grid-template-columns:repeat(2,minmax(0,1fr))}}
+  @media(max-width:620px){.buckets{grid-template-columns:1fr}}
+  .bcol{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
+    padding:9px 10px 10px;min-height:104px;transition:background .12s,border-color .12s}
+  .bcol.over{border-color:var(--ink);background:#FCFDFE;box-shadow:inset 0 0 0 1px var(--ink)}
+  .bhead{display:flex;align-items:baseline;gap:8px;padding-bottom:7px;margin-bottom:9px;
+    border-bottom:2px solid var(--hairline)}
+  .bhead .btitle{font-size:0.82rem;font-weight:600}
+  .bhead .bsig{font-family:'IBM Plex Mono',monospace;font-size:0.55rem;letter-spacing:0.1em;
+    text-transform:uppercase;color:var(--faint)}
+  .bhead .bn{margin-left:auto;font-family:'IBM Plex Mono',monospace;font-size:0.66rem;color:var(--faint)}
+  /* the two in-progress signals must not read alike: act vs chase */
+  .bcol.k-progress .bhead{border-bottom-color:var(--moss)}
+  .bcol.k-progress .bhead .bsig{color:var(--moss)}
+  .bcol.k-waiting{background:var(--amber-bg)}
+  .bcol.k-waiting .bhead{border-bottom-color:var(--amber)}
+  .bcol.k-waiting .bhead .bsig{color:var(--amber);font-weight:500}
+  .bcol.k-waiting .tcard{border-left-color:var(--amber)}
+  .bcol.k-done{background:var(--paper);border-style:dashed}
+  .bcol.k-done .bhead{border-bottom-color:var(--moss);border-bottom-width:1px}
+  .bcol.k-done .tcard{opacity:0.72;box-shadow:none}
+  .bempty{font-size:0.8rem;color:var(--faint);padding:4px 2px}
+
+  .tcard{position:relative;background:var(--white);border:1px solid var(--hairline);
+    border-left:3px solid var(--hairline);border-radius:0 2px 2px 0;padding:8px 9px 7px;
+    margin-bottom:9px;box-shadow:0 1px 3px rgba(33,37,43,0.10)}
+  .tcard[draggable="true"]{cursor:grab}
+  .tcard.dragging{opacity:0.4}
+  .tcard.s-part{border-left-color:var(--amber)}
+  .tcard.s-done{border-left-color:var(--moss)}
+  .tcard.blocked{border-left-style:dashed}
+  .trow{display:grid;grid-template-columns:20px minmax(0,1fr);gap:8px;align-items:start}
+  .tick3{flex:none;width:20px;height:20px;margin-top:1px;border:2px solid var(--faint);
+    border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.72rem;
+    color:var(--white);cursor:pointer;background:none;padding:0}
+  .tick3.part{border-color:var(--amber);
+    background:linear-gradient(to right,var(--amber) 0 50%,transparent 50% 100%)}
+  .tick3.done{background:var(--moss);border-color:var(--moss)}
+  .ttitle{font-size:0.93rem;line-height:1.35;cursor:pointer;
+    overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3}
+  .tcard.open .ttitle{-webkit-line-clamp:unset;display:block}
+  .tcard.s-done .ttitle{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
+  .tbody{font-size:0.83rem;color:var(--faint);line-height:1.45;margin-top:3px;
+    overflow:hidden;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+  .tcard.open .tbody{-webkit-line-clamp:unset;display:block}
+  .tmeta{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:6px}
+  .tproj{font-family:'IBM Plex Mono',monospace;font-size:0.58rem;letter-spacing:0.05em;
+    text-transform:uppercase;color:var(--faint);min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap;max-width:130px}
+  .tcard .urg{margin-top:0}
+  .dep{font-family:'IBM Plex Mono',monospace;font-size:0.56rem;letter-spacing:0.06em;
+    text-transform:uppercase;color:var(--amber);font-weight:500}
+  .dep.clear{color:var(--moss)}
+  .tmove{margin-left:auto;display:flex;gap:2px;flex:none}
+  .tmove button{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;line-height:1;
+    color:var(--faint);background:none;border:1px solid var(--hairline);border-radius:2px;
+    cursor:pointer;padding:2px 5px}
+  .tmove button:hover{color:var(--ink);border-color:var(--ink)}
+  .tmove button:disabled{opacity:0.25;cursor:default}
+  .tbtn{font:inherit;font-size:0.74rem;color:var(--faint);background:none;border:none;
+    cursor:pointer;padding:0}
+  .tbtn:hover{color:var(--ink)}
+  .tcard.spot{background:var(--amber-bg);border-left-color:var(--amber)}
+  .tspot{font-family:'Caveat',cursive;font-size:1.02rem;line-height:1.25;color:var(--amber);
+    margin:6px 0 0 28px}
+
+  /* ownership — initials in a circle, on the doing layer only */
+  .owns{display:flex;gap:4px;align-items:center;flex:none}
+  .own{width:21px;height:21px;border-radius:50%;border:1.6px solid var(--ink);background:var(--white);
+    font-family:'Caveat',cursive;font-weight:600;font-size:0.82rem;line-height:1;color:var(--ink);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0}
+  .own.me{border-color:var(--moss);color:var(--moss)}
+  .own.them{border-color:var(--amber);color:var(--amber)}
+  .own.sec{width:18px;height:18px;font-size:0.72rem;border-style:dashed;border-color:var(--faint);
+    color:var(--faint);cursor:default}
+  /* the empty owner slot is an affordance, not furniture — 40 dotted circles
+     down a board is noise. Revealed on hover; always there on touch. */
+  .own.add{border-style:dotted;border-color:var(--hairline);color:var(--faint);
+    font-family:'IBM Plex Sans',sans-serif;font-size:0.8rem;font-weight:400;display:none}
+  .tcard:hover .own.add,.sub:hover .own.add{display:flex}
+  @media (hover:none){.own.add{display:flex}}
+  .owns:empty{display:none}
+
+  /* subtasks — a person can own one inside a task someone else owns */
+  .subs{margin:6px 0 0;border-top:1px dashed var(--hairline);padding-top:5px}
+  .sub{display:grid;grid-template-columns:15px minmax(0,1fr) auto;gap:7px;align-items:start;padding:2px 0}
+  .stick{width:14px;height:14px;margin-top:3px;border:1.4px solid var(--faint);border-radius:2px;
+    background:none;cursor:pointer;font-family:'Caveat',cursive;font-size:1rem;line-height:0.7;
+    color:var(--redpen);padding:0}
+  .sub .stext{font-size:0.84rem;line-height:1.35}
+  .sub.done .stext{color:var(--faint);text-decoration:line-through;
+    text-decoration-color:var(--redpen);text-decoration-thickness:1.5px}
+
+  /* update log — progress that isn't completion */
+  .tupd{margin-top:6px;border-top:1px dashed var(--hairline);padding-top:5px}
+  .tupd .uline{font-family:'Kalam',cursive;font-size:0.83rem;line-height:1.4;color:var(--biro);
+    padding:2px 0}
+  .tupd .uline .ts{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;color:var(--faint);
+    margin-right:7px}
+  /* the update affordance sits beside every task but isn't furniture:
+     revealed on hover, always visible on touch (same rule as .wprov) */
+  .urow{display:none;gap:12px;align-items:baseline;margin-top:5px}
+  .tcard:hover > .urow,.tcard.open > .urow{display:flex}
+  @media (hover:none){.tcard > .urow{display:flex}}
+  .bmore{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;letter-spacing:0.08em;
+    text-transform:uppercase;color:var(--faint);background:none;border:none;cursor:pointer;
+    padding:4px 2px;display:block}
+  .bmore:hover{color:var(--ink)}
+  .updInput{font-family:'Kalam',cursive;font-size:0.85rem;color:var(--biro);width:100%;
+    background:var(--stickyG);border:1px solid var(--stickyGd);border-radius:3px;padding:4px 7px;margin-top:5px}
+
+  /* --- band 3: the binders --- */
+  .spines{display:flex;gap:5px;align-items:flex-end;overflow-x:auto;padding:12px 2px 10px;
+    margin-bottom:6px}
+  .spine{position:relative;flex:none;width:32px;height:148px;background:var(--white);
+    border:1px solid var(--hairline);border-radius:3px 3px 0 0;box-shadow:2px 2px 5px rgba(33,37,43,0.14);
+    cursor:pointer;display:flex;align-items:flex-end;justify-content:center;padding:0 0 12px;
+    transition:transform .12s}
+  .spine span{writing-mode:vertical-rl;transform:rotate(180deg);font-family:'Fraunces',serif;
+    font-weight:600;font-size:0.76rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-height:114px}
+  .spine .sdot{position:absolute;top:9px;left:50%;margin-left:-3px;width:6px;height:6px;
+    border-radius:50%;background:var(--amber)}
+  .spine.on{transform:translateY(-10px);border-color:var(--ink)}
+  .spine:hover{transform:translateY(-4px)}
+  .binders{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px;
+    align-items:start}
+  .binder{position:relative;background:var(--white);border:1px solid var(--hairline);
+    border-left:9px solid var(--hairline);border-radius:0 2px 2px 0;padding:12px 15px 12px;
+    box-shadow:0 2px 5px rgba(33,37,43,0.10);scroll-margin-top:20px}
+  .binder.on{border-left-color:var(--redpen);box-shadow:0 5px 14px rgba(33,37,43,0.16)}
+  .binder .bhd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .binder h3{font-family:'Fraunces',serif;font-weight:600;font-size:1.05rem;flex:1;min-width:0}
+  .binder .bsum{font-size:0.88rem;color:var(--faint);line-height:1.5;margin-top:6px}
+  .binder .bcounts{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;letter-spacing:0.06em;
+    text-transform:uppercase;color:var(--faint);margin-top:9px;display:flex;gap:12px;flex-wrap:wrap}
+  .binder .bcounts b{font-weight:500;color:var(--ink)}
+  .binder .bshelf{margin-top:8px;border-top:1px solid var(--hairline);padding-top:6px}
+  .binder .bshelf .blab{font-family:'IBM Plex Mono',monospace;font-size:0.55rem;letter-spacing:0.1em;
+    text-transform:uppercase;color:var(--moss)}
+  .binder .bshelf p{font-size:0.82rem;color:var(--faint);padding:1px 0}
+  .binder .bshelf p::before{content:"✓ ";font-family:'Caveat',cursive;color:var(--moss)}
+
+  /* --- Q&A: a question is never silently resolved --- */
+  .qa{position:relative;margin:30px 0 6px;padding:12px 14px 10px;background:var(--white);
+    border:1px solid var(--hairline);border-radius:0 2px 2px 2px}
+  .qa h2{position:absolute;top:-21px;left:-1px;margin:0;background:var(--stickyY);
+    border:1px solid var(--hairline);border-bottom:1px solid var(--stickyY);
+    border-radius:4px 4px 0 0;padding:2px 14px 1px;font-family:'IBM Plex Mono',monospace;
+    font-size:0.66rem;font-weight:500;letter-spacing:0.14em;text-transform:uppercase;color:var(--ink)}
+  .qa h2 .qbadge{display:inline-block;background:var(--redpen);color:#fff;border-radius:99px;
+    padding:0 6px;margin-left:8px;font-size:0.6rem}
+  .qitem{padding:8px 0;border-bottom:1px solid var(--hairline)}
+  .qitem:last-of-type{border-bottom:none}
+  .qtopic{font-family:'IBM Plex Mono',monospace;font-size:0.58rem;letter-spacing:0.1em;
+    text-transform:uppercase;color:var(--faint)}
+  .qmsg{font-family:'Kalam',cursive;font-size:0.94rem;line-height:1.45;color:var(--biro);margin-top:2px;
+    white-space:pre-wrap}
+  .qmsg.claude{font-family:'Caveat',cursive;font-size:1.15rem;color:var(--redpen);margin-top:5px}
+  .qitem.open{background:var(--stickyY);margin:0 -14px;padding:9px 14px;border-bottom:none;
+    box-shadow:0 2px 6px rgba(33,37,43,0.12)}
+  .qitem.open + .qitem.open{margin-top:6px}
+  .qwait{font-family:'IBM Plex Mono',monospace;font-size:0.58rem;letter-spacing:0.08em;
+    text-transform:uppercase;color:var(--redpen);margin-top:4px}
+  .qarow{display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap}
+  .qarow input{font-family:'Kalam',cursive;font-size:0.9rem;color:var(--biro);flex:1;min-width:180px;
+    border:1px solid var(--hairline);border-radius:4px;padding:6px 9px;background:var(--white)}
+  .qarow button{font-family:'IBM Plex Mono',monospace;font-size:0.62rem;letter-spacing:0.1em;
+    text-transform:uppercase;background:none;border:1px solid var(--hairline);border-radius:2px;
+    color:var(--faint);padding:5px 10px;cursor:pointer}
+  .qarow button:hover{color:var(--ink);border-color:var(--ink)}
+  .qarow button:disabled{opacity:0.5;cursor:wait}
+
+  /* --- new widgets (v118) --- */
+  .wtoday{grid-column:1/-1;background:var(--white);border:1px solid var(--hairline);
+    border-radius:2px;padding:10px 14px 10px}
+  .wlab{font-family:'IBM Plex Mono',monospace;font-size:0.6rem;letter-spacing:0.12em;
+    text-transform:uppercase;color:var(--faint)}
+  .tstrip{display:flex;flex-wrap:wrap;gap:7px 20px;margin-top:7px}
+  .tsitem{display:flex;gap:7px;align-items:baseline;font-size:0.9rem;max-width:100%}
+  .tsitem.done span{color:var(--faint);text-decoration:line-through;text-decoration-thickness:1px}
+  .tsdot{flex:none;width:9px;height:9px;border-radius:50%;border:1.6px solid var(--faint);
+    position:relative;top:4px}
+  .tsitem.part .tsdot{border-color:var(--amber);
+    background:linear-gradient(to right,var(--amber) 0 50%,transparent 50% 100%)}
+  .tsitem.done .tsdot{background:var(--moss);border-color:var(--moss)}
+  .tsitem.wait .tsdot{border-color:var(--amber);border-style:dashed}
+
+  .wagenda{background:var(--white);border:1px solid var(--hairline);border-radius:2px;
+    padding:11px 14px 10px}
+  .aday{display:grid;grid-template-columns:74px minmax(0,1fr);gap:10px;padding:7px 0;
+    border-top:1px solid var(--hairline)}
+  .aday:nth-of-type(1){border-top:none}
+  .adate{font-family:'IBM Plex Mono',monospace;font-size:0.63rem;letter-spacing:0.06em;
+    text-transform:uppercase;color:var(--faint);line-height:1.5}
+  .aday.today .adate{color:var(--redpen);font-weight:500}
+  .aday.today .adate::after{content:" ●";font-size:0.5rem}
+  .aitem{display:flex;gap:9px;font-size:0.9rem;line-height:1.45}
+  .atime{font-family:'IBM Plex Mono',monospace;font-size:0.68rem;color:var(--biro);flex:none;
+    width:42px;position:relative;top:2px}
+  .anone{font-size:0.86rem;color:var(--hairline)}
+  .ahz{font-family:'Caveat',cursive;font-size:1.05rem;color:var(--faint);margin-top:8px;
+    border-top:1px solid var(--hairline);padding-top:6px}
+
+  .wradar{background:var(--white);border:1px solid var(--hairline);border-left:3px solid var(--amber);
+    border-radius:0 2px 2px 0;padding:11px 14px 10px}
+  .rrow{display:flex;justify-content:space-between;gap:10px;align-items:baseline;padding:6px 0;
+    border-top:1px dashed var(--hairline)}
+  .rrow:nth-of-type(1){border-top:none}
+  .rwhat{font-size:0.89rem;line-height:1.35;min-width:0}
+  .rwhat small{display:block;font-family:'IBM Plex Mono',monospace;font-size:0.56rem;
+    letter-spacing:0.09em;text-transform:uppercase;color:var(--faint);margin-top:2px}
+  .rdays{font-family:'Caveat',cursive;font-weight:600;font-size:1.25rem;color:var(--ink);
+    white-space:nowrap;flex:none}
+  .rrow.late .rdays{color:var(--redpen);text-decoration:underline;text-decoration-thickness:2px;
+    text-underline-offset:3px}
+
+  .wribbon{grid-column:1/-1;background:var(--white);border:1px solid var(--hairline);
+    border-top:2px solid var(--moss);border-radius:0 0 2px 2px;padding:9px 14px 8px}
+  .wribbon .rlab{color:var(--moss)}
+  .ribbonrow{display:flex;flex-wrap:wrap;gap:2px 18px;margin-top:5px}
+  .ritem{display:inline-flex;gap:6px;align-items:baseline;font-size:0.85rem;color:var(--faint)}
+  .ritem::before{content:"✓";font-family:'Caveat',cursive;font-size:1.05rem;color:var(--moss)}
+  .ritem b{font-weight:400;color:var(--ink)}
+
+  .wq{background:var(--stickyY);border-radius:2px;box-shadow:0 3px 8px rgba(33,37,43,0.16);
+    padding:12px 15px 11px;transform:rotate(-0.5deg)}
+  .wq .qtext{font-family:'Kalam',cursive;font-size:0.95rem;line-height:1.45;color:var(--biro);
+    margin-top:4px;white-space:pre-wrap}
+  .wq .qage{font-family:'Caveat',cursive;font-size:1.05rem;color:var(--redpen);margin-top:6px}
 </style>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#FFD447">
@@ -813,6 +1102,16 @@
       </div>
       <div id="notesV2"></div>
     </div>
+    <div class="qa" id="qaPanel">
+      <h2>Questions <span class="qbadge hidden" id="qBadge">0</span></h2>
+      <div id="qaList"></div>
+      <div class="qarow">
+        <input id="qaInput" type="text" placeholder="Ask a question — it stays open until it's answered." aria-label="Ask a question">
+        <button id="qaAskBtn">ask</button>
+        <button id="qaAnswerBtn">answer open questions</button>
+        <span class="toolstatus" id="qaStatus"></span>
+      </div>
+    </div>
   <div id="takePanel" class="take hidden">
     <div class="take-head">
       <span class="take-label">Claude's take</span>
@@ -823,24 +1122,30 @@
     <button class="take-more hidden" id="takeMoreBtn"></button>
     <div class="take-history hidden" id="takeHistory"></div>
   </div>
+    <!-- Band 1 — widgets. Presentation only; they own no data. -->
     <div id="wTop"></div>
 
-    <main>
-      <section>
-        <h2>Today's plan <b id="planDateV2"></b></h2>
-        <div id="planList"></div>
-      </section>
-      <aside>
-        <h2>Projects</h2>
-        <div id="board"></div>
-        <div class="diffs">
-          <h2 style="margin:0 0 8px">Board changes</h2>
-          <div id="diffLatest"></div>
-          <button class="take-more hidden" id="diffMoreBtn"></button>
-          <div id="diffHistory" class="hidden"></div>
-        </div>
-      </aside>
-    </main>
+    <!-- Band 2 — buckets. The doing layer; the only tick boxes on the page. -->
+    <div class="band">
+      <h2>Buckets <b id="planDateV2"></b> <em>drag to refile</em></h2>
+      <div class="buckets" id="buckets"></div>
+    </div>
+
+    <!-- Band 3 — binders. The thinking layer; no ticks, ever. -->
+    <div class="band">
+      <h2>Projects <em>state of play</em></h2>
+      <div class="spines" id="spines"></div>
+      <div class="binders" id="binders"></div>
+    </div>
+
+    <div class="band">
+      <div class="diffs" style="margin-top:0">
+        <h2 style="margin:0 0 8px">Board changes</h2>
+        <div id="diffLatest"></div>
+        <button class="take-more hidden" id="diffMoreBtn"></button>
+        <div id="diffHistory" class="hidden"></div>
+      </div>
+    </div>
 
     <div class="tools">
       <h2>Tools <span class="toolstatus" id="spendTally" style="float:right;text-transform:none;letter-spacing:0"></span></h2>
@@ -1131,13 +1436,6 @@
     }
     return null;
   }
-  function toggleActionDone(id){
-    const f = findAction(id); if (!f) return;
-    flashSaving();
-    firebase.database().ref("walkReference/projects/" + f.pi + "/actions/" + f.ai + "/done")
-      .set(!f.a.done).then(touchMeta)
-      .catch(e => alert("Save failed: " + e.message));
-  }
   function saveNotesV2(notes){
     flashSaving();
     return firebase.database().ref("walkReference/notes").set(notes)
@@ -1168,6 +1466,203 @@
     if (!n || n.state !== "open") return;
     if (!confirm("Delete this note?")) return;
     saveNotesV2(notes.filter(x => x.id !== id));
+  }
+
+  /* =============== v3 object model (board architecture redesign) ===============
+     Three object types, never bleeding into each other:
+       tasks    — the DOING layer. Title + body, a status that moves through the
+                  buckets, an append-only update log, layered ownership, subtasks,
+                  dependency links. If it can be ticked, it's a task.
+       projects — the THINKING layer. A binder with a rolling summary. No ticks.
+       widgets  — the PRESENTATION layer. They own no data; they point at a task
+                  or a project and render it a particular way.
+     Everything is derived when absent, so a v2 board renders correctly untouched. */
+  const BUCKETS = [
+    { key: "agenda",   label: "On the agenda", sig: "" },
+    { key: "progress", label: "In progress",   sig: "mine · act" },
+    { key: "waiting",  label: "Waiting",       sig: "them · chase" },
+    { key: "done",     label: "Done",          sig: "recently" }
+  ];
+  const BUCKET_KEYS = BUCKETS.map(b => b.key);
+  // How many cards a column shows before it folds — the backlog is real, but a
+  // mile of one column isn't a board.
+  const COL_CAP = { agenda: 8, progress: 14, waiting: 14, done: 6 };
+  const openCols = new Set();
+  let expandedTask = null;           // task id showing its full body
+  let openLogTask = null;            // task id showing its whole update log
+  let updatingTask = null;           // task id with the update composer open
+  let pulledProject = null;          // binder pulled off the shelf
+  let showAnsweredQs = false;
+  let dragTaskId = null;
+
+  const meId = () => String(state?.meta?.me || "richard");
+  function peopleArr(){ return asArray(state?.people); }
+  function personOf(pid){
+    if (!pid) return null;
+    const p = peopleArr().find(x => x && x.id === pid);
+    if (p) return { id: p.id, name: p.name || p.id, initials: p.initials || initialsOf(p.name || p.id) };
+    return { id: pid, name: pid, initials: initialsOf(pid) };
+  }
+  const initialsOf = name => String(name || "").trim().split(/[\s-]+/)
+    .map(w => w.charAt(0).toUpperCase()).join("").slice(0, 2) || "?";
+  const isMe = pid => !!pid && pid === meId();
+
+  function taskStatus(a){ return ["open","part","done"].includes(a?.status) ? a.status : (a?.done ? "done" : "open"); }
+  function allTasks(){
+    const out = [];
+    asArray(state?.projects).forEach((p, pi) => asArray(p.actions).forEach((a, ai) => {
+      if (a && a.id) out.push({ a, p, pi, ai });
+    }));
+    return out;
+  }
+  // Dependency links: predecessors that haven't finished yet.
+  function blockers(a){
+    return asArray(a?.blockedBy).map(id => findAction(id)).filter(f => f && !f.a.done).map(f => f.a);
+  }
+  function onPlan(id){ return asArray(state?.plan?.actionIds).map(String).includes(String(id)); }
+  /* An explicit bucket always wins. Where a board hasn't been refiled yet the
+     bucket is derived, and the two derivations that matter are the spec's own:
+     a task blocked by an unfinished predecessor, or one whose primary owner
+     isn't Richard, reads as Waiting — a chase, not a do. */
+  function taskBucket(a){
+    if (BUCKET_KEYS.includes(a?.bucket) && (a.bucket === "done") === (taskStatus(a) === "done")) return a.bucket;
+    if (taskStatus(a) === "done") return "done";
+    if (blockers(a).length) return "waiting";
+    const primary = a?.owners?.primary;
+    if (primary && !isMe(primary)) return "waiting";
+    if (taskStatus(a) === "part" || onPlan(a.id)) return "progress";
+    return "agenda";
+  }
+  const daysSince = iso => { const d = Math.floor((Date.now() - new Date(iso)) / 86400000);
+    return isNaN(d) ? null : Math.max(0, d); };
+  function latestUpdate(a){
+    const u = asArray(a?.updates); return u.length ? u[u.length - 1] : null;
+  }
+
+  /* ---------- v3 writes (path-scoped, same model as every other desk write) ---------- */
+  function writeTask(id, patch){
+    const f = findAction(id); if (!f) return Promise.resolve();
+    flashSaving();
+    return firebase.database().ref("walkReference/projects/" + f.pi + "/actions/" + f.ai)
+      .update(patch).then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  // done stays the source of truth: done === (status === 'done').
+  function setTaskStatus(id, status){
+    const f = findAction(id); if (!f) return;
+    const patch = { status, done: status === "done" };
+    if (status === "done") { patch.bucket = "done"; patch.doneTs = f.a.doneTs || new Date().toISOString(); }
+    else { patch.doneTs = null; if ((f.a.bucket || "") === "done") patch.bucket = taskBucket({ ...f.a, status, done: false, bucket: null }); }
+    writeTask(id, patch);
+  }
+  function cycleStatus(id){
+    const f = findAction(id); if (!f) return;
+    const s = taskStatus(f.a);
+    setTaskStatus(id, s === "open" ? "part" : s === "part" ? "done" : "open");
+  }
+  function setTaskBucket(id, bucket){
+    if (!BUCKET_KEYS.includes(bucket)) return;
+    if (bucket === "done") return setTaskStatus(id, "done");
+    const f = findAction(id); if (!f) return;
+    if (taskBucket(f.a) === bucket) return;
+    const patch = { bucket };
+    if (taskStatus(f.a) === "done") { patch.status = "open"; patch.done = false; patch.doneTs = null; }
+    // The chase radar counts days, so the clock starts when it starts waiting.
+    if (bucket === "waiting") { if (!f.a.waitingSince) patch.waitingSince = new Date().toISOString(); }
+    else patch.waitingSince = null;
+    writeTask(id, patch);
+  }
+  function moveTask(id, dir){
+    const f = findAction(id); if (!f) return;
+    const i = BUCKET_KEYS.indexOf(taskBucket(f.a));
+    const next = BUCKET_KEYS[i + dir];
+    if (next) setTaskBucket(id, next);
+  }
+  // A progress note attaches WITHOUT a tick — the op whose absence forced
+  // logging progress as brand-new actions.
+  function appendTaskUpdate(id, text){
+    updatingTask = null;
+    const clean = String(text || "").trim();
+    const f = findAction(id);
+    if (!f || !clean) { render(); return; }
+    const ups = asArray(f.a.updates).map(u => ({ text: u.text, ts: u.ts }));
+    ups.push({ text: clean, ts: new Date().toISOString() });
+    const patch = { updates: ups };
+    if (taskStatus(f.a) === "open") { patch.status = "part"; patch.done = false; }   // movement short of completion
+    openLogTask = id;
+    writeTask(id, patch);
+  }
+  function toggleSubtask(id, sid){
+    const f = findAction(id); if (!f) return;
+    const si = asArray(f.a.subtasks).findIndex(s => s && s.id === sid);
+    if (si < 0) return;
+    flashSaving();
+    firebase.database().ref("walkReference/projects/" + f.pi + "/actions/" + f.ai + "/subtasks/" + si + "/done")
+      .set(!asArray(f.a.subtasks)[si].done).then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  /* One-tap primary-owner swap — the a65 case (the last 24 portals bouncing
+     Tom -> Richard) is an ownership change, not a refile. */
+  function cycleOwner(taskId, subId){
+    const f = findAction(taskId); if (!f) return;
+    const target = subId ? asArray(f.a.subtasks).find(s => s && s.id === subId) : f.a;
+    if (!target) return;
+    const roster = peopleArr().map(p => p.id);
+    if (!roster.length) return addOwner(taskId, subId);
+    const cur = target.owners?.primary || null;
+    const i = cur ? roster.indexOf(cur) : -1;
+    const next = i < 0 ? roster[0] : (i + 1 < roster.length ? roster[i + 1] : null);
+    writeOwners(taskId, subId, next);
+  }
+  function addOwner(taskId, subId){
+    const name = (prompt("Who owns this?") || "").trim();
+    if (!name) return;
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    const people = peopleArr().map(p => ({ ...p }));
+    if (!people.some(p => p.id === id)) people.push({ id, name, initials: initialsOf(name) });
+    flashSaving();
+    firebase.database().ref("walkReference/people").set(people)
+      .then(() => writeOwners(taskId, subId, id))
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  function writeOwners(taskId, subId, primary){
+    const f = findAction(taskId); if (!f) return;
+    const base = "walkReference/projects/" + f.pi + "/actions/" + f.ai +
+      (subId ? "/subtasks/" + asArray(f.a.subtasks).findIndex(s => s && s.id === subId) : "");
+    const patch = { owners: { ...(subId ? {} : (f.a.owners || {})), primary: primary || null } };
+    if (subId) {
+      flashSaving();
+      firebase.database().ref(base + "/owners/primary").set(primary || null)
+        .then(touchMeta).catch(e => alert("Save failed: " + e.message));
+      return;
+    }
+    // handing it over starts the chase clock; taking it back stops it
+    patch.owners.secondary = asArray(f.a.owners?.secondary);
+    patch.waitingSince = (primary && !isMe(primary))
+      ? (f.a.waitingSince || new Date().toISOString()) : null;
+    writeTask(taskId, patch);
+  }
+
+  /* ---------- conversations: a question is never silently resolved ---------- */
+  function convsArr(){ return asArray(state?.conversations).map(c => ({ ...c })); }
+  function askQuestion(text){
+    const clean = String(text || "").trim();
+    if (!clean) return;
+    const cs = convsArr();
+    cs.push({ id: "c" + Date.now(), topic: clean.slice(0, 60), state: "open",
+      opened: new Date().toISOString(),
+      thread: [{ author: "richard", text: clean, ts: new Date().toISOString() }] });
+    flashSaving();
+    firebase.database().ref("walkReference/conversations").set(cs).then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
+  }
+  function closeConversation(cid){
+    const cs = convsArr();
+    const c = cs.find(x => x.id === cid); if (!c) return;
+    c.state = "closed";
+    flashSaving();
+    firebase.database().ref("walkReference/conversations").set(cs).then(touchMeta)
+      .catch(e => alert("Save failed: " + e.message));
   }
 
   /* ---------- widgets (presentation licence, spec v110) ---------- */
@@ -1263,29 +1758,40 @@
             (o === P.leaning ? '<span class="lean">✓?</span>' : "") +
             '</button>').join("") + '</div>' + prov + '</div>';
       }
+      /* v118: the month grid was too basic — replaced by an agenda strip.
+         Same props.marks data, new presentation: today's fixed points with
+         times, then the next few days, countdown feel baked in. */
       case "calendar": {
-        const first = new Date((P.month || "") + "-01T00:00:00");
-        if (isNaN(first)) return "";
-        const y = first.getFullYear(), m = first.getMonth();
-        const dim = new Date(y, m + 1, 0).getDate();
-        const lead = (first.getDay() + 6) % 7;            // Monday-start
-        const marks = {}; asArray(P.marks).forEach(x => {
-          const d = new Date(x.date); if (!isNaN(d) && d.getMonth() === m) marks[d.getDate()] = x.label; });
-        const now = new Date();
-        const today = (now.getFullYear() === y && now.getMonth() === m) ? now.getDate() : 0;
-        const ellipse = '<svg viewBox="0 0 30 30" preserveAspectRatio="none" aria-hidden="true">' +
-          '<ellipse cx="15" cy="15" rx="13" ry="12"/></svg>';
-        let cells = ["MO","TU","WE","TH","FR","SA","SU"].map(h => '<div class="ch">' + h + '</div>').join("");
-        for (let i = 0; i < lead; i++) cells += '<div class="cd out"></div>';
-        for (let d = 1; d <= dim; d++)
-          cells += '<div class="cd' + (marks[d] ? " mark" : "") + (d === today ? " today" : "") + '">' +
-            d + (d === today ? ellipse : "") + '</div>';
-        const legend = Object.keys(marks).map(d =>
-          '<div><b>' + d + '</b>' + esc(marks[d]) + '</div>').join("");
-        return '<div class="wcal"><div class="cmon">' +
-          esc(first.toLocaleDateString("en-GB", { month: "long", year: "numeric" })) + '</div>' +
-          '<div class="cgrid">' + cells + '</div>' +
-          (legend ? '<div class="clegend">' + legend + '</div>' : "") + prov + '</div>';
+        const day0 = new Date(); day0.setHours(0, 0, 0, 0);
+        const marks = asArray(P.marks).map(x => {
+          const d = new Date(x.date); if (isNaN(d)) return null;
+          const timed = /T\d{2}:\d{2}/.test(String(x.date));
+          const key = new Date(d); key.setHours(0, 0, 0, 0);
+          return { d, key, days: Math.round((key - day0) / 86400000),
+            time: x.time || (timed ? d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : ""),
+            label: x.label };
+        }).filter(x => x && x.days >= 0).sort((a, b) => a.key - b.key || String(a.time).localeCompare(String(b.time)));
+        if (!marks.length) return "";
+        const WINDOW = 7;
+        let rows = "";
+        for (let n = 0; n < WINDOW; n++) {
+          const on = marks.filter(x => x.days === n);
+          if (!on.length && n > 0) continue;                       // only today earns an empty row
+          const d = new Date(day0.getTime() + n * 86400000);
+          const label = n === 0 ? "Today" : n === 1 ? "Tomorrow"
+            : d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+          rows += '<div class="aday' + (n === 0 ? " today" : "") + '">' +
+            '<div class="adate">' + esc(label) + '</div><div>' +
+            (on.length ? on.map(x => '<div class="aitem"><span class="atime">' +
+              esc(x.time || "—") + '</span><span>' + esc(x.label) + '</span></div>').join("")
+              : '<div class="anone">nothing fixed</div>') +
+            '</div></div>';
+        }
+        const beyond = marks.filter(x => x.days >= WINDOW).slice(0, 3);
+        const hz = beyond.length ? '<div class="ahz">' + beyond.map(x =>
+          esc(x.label) + " — " + x.days + (x.days === 1 ? " day" : " days")).join(" · ") + '</div>' : "";
+        return '<div class="wagenda"><div class="wlab">' +
+          esc(P.title || "The next seven days") + '</div>' + rows + hz + prov + '</div>';
       }
       case "tally": {
         const count = Math.max(0, Math.min(200, +(P.count) || 0));
@@ -1366,22 +1872,122 @@
           asArray(P.items).slice(0, 4).map(t => '<div class="hcard">' + esc(t) + '</div>').join("") +
           '</div><div class="shelf"></div>' +
           '<div class="hlabel">the long game</div></div>';
+      /* ---- v118 types. All four are pure views over the board's own objects:
+             they own no data, they point at tasks/projects/conversations. ---- */
+      case "today": {
+        const items = asArray(P.items);
+        if (!items.length) return "";
+        return '<div class="wtoday"><div class="wlab">' + esc(P.label || "Today") +
+          (P.date ? " · " + esc(P.date) : "") + '</div><div class="tstrip">' +
+          items.map(it => '<div class="tsitem ' + esc(it.status || "open") +
+            (it.waiting ? " wait" : "") + '"><span class="tsdot"></span><span>' +
+            esc(it.text) + '</span></div>').join("") + '</div>' + prov + '</div>';
+      }
+      case "chaseradar": {
+        const items = asArray(P.items);
+        if (!items.length) return "";
+        return '<div class="wradar"><div class="wlab">' + esc(P.label || "Waiting on") + '</div>' +
+          items.map(it => '<div class="rrow' + (it.days >= 7 ? " late" : "") + '">' +
+            '<div class="rwhat">' + esc(it.what) + '<small>' + esc(it.why) + '</small></div>' +
+            (it.days === null || it.days === undefined ? ""
+              : '<div class="rdays">' + it.days + (it.days === 1 ? " day" : " days") + '</div>') +
+            '</div>').join("") +
+          prov + '</div>';
+      }
+      case "ribbon": {
+        const items = asArray(P.items);
+        if (!items.length) return "";
+        return '<div class="wribbon"><div class="wlab rlab">' + esc(P.label || "Recently done") + '</div>' +
+          '<div class="ribbonrow">' + items.map(it =>
+            '<span class="ritem"><b>' + esc(it.text) + '</b>' +
+            (it.proj ? " · " + esc(it.proj) : "") + '</span>').join("") + '</div>' +
+          (P.more ? '<div class="wlab" style="margin-top:5px">+ ' + esc(P.more) + ' more on the shelves</div>' : "") +
+          prov + '</div>';
+      }
+      case "question": {
+        if (!P.text) return "";
+        return '<div class="wq"><div class="wlab">Open question' +
+          (P.topic ? ' · ' + esc(P.topic) : "") + '</div>' +
+          '<div class="qtext">' + esc(P.text) + '</div>' +
+          '<div class="qage">' + esc(P.age || "unanswered") + '</div>' + prov + '</div>';
+      }
       default: return "";           // unknown type — forward-compatible, render nothing
     }
   }
+
+  /* ---------- derived widgets: Claude curates, the desk surfaces ----------
+     These four are views over objects the board already holds, so the desk
+     builds them itself rather than waiting for a compile to author them. */
+  function todayWidget(){
+    const ids = asArray(state?.plan?.actionIds);
+    if (!ids.length) return null;
+    const items = ids.map(id => {
+      const f = findAction(id); if (!f) return null;
+      return { text: f.a.text, status: taskStatus(f.a), waiting: taskBucket(f.a) === "waiting" };
+    }).filter(Boolean);
+    return items.length ? { type: "today", props: { label: "Today's must-lands", date: state?.plan?.date, items } } : null;
+  }
+  function chaseRadarWidget(){
+    const items = allTasks().filter(f => taskBucket(f.a) === "waiting").map(f => {
+      const bl = blockers(f.a);
+      const owner = f.a.owners?.primary && !isMe(f.a.owners.primary) ? personOf(f.a.owners.primary) : null;
+      const why = bl.length ? "blocked by " + bl.map(b => b.text).join("; ").slice(0, 60)
+        : owner ? "with " + owner.name : "waiting";
+      // Only count from a stamp the board actually holds — an unknown wait is
+      // shown as unknown, never guessed at.
+      const since = f.a.waitingSince || latestUpdate(f.a)?.ts;
+      return { what: f.a.text, why: why + " · " + f.p.title, days: since ? daysSince(since) : null };
+    });
+    if (!items.length) return null;
+    items.sort((a, b) => (b.days ?? -1) - (a.days ?? -1));
+    return { type: "chaseradar", props: { label: "Waiting on — the chase radar", items: items.slice(0, 6) } };
+  }
+  function ribbonWidget(){
+    // Done tasks never vanish; only the recent ones surface.
+    const done = allTasks().filter(f => taskStatus(f.a) === "done");
+    if (!done.length) return null;
+    const stamped = done.filter(f => f.a.doneTs)
+      .sort((a, b) => String(b.a.doneTs).localeCompare(String(a.a.doneTs)));
+    const recent = (stamped.length ? stamped : done.slice(-6).reverse()).slice(0, 6);
+    return { type: "ribbon", props: { label: "Recently done", more: Math.max(0, done.length - recent.length),
+      items: recent.map(f => ({ text: f.a.text, proj: f.p.title })) } };
+  }
+  function questionWidgets(){
+    return convsArr().filter(c => c.state === "open").slice(0, 2).map(c => {
+      const first = asArray(c.thread)[0];
+      const d = daysSince(c.opened || first?.ts);
+      return { type: "question", props: { topic: c.topic, text: first?.text || c.topic,
+        age: d === null ? "unanswered" : d === 0 ? "asked today — unanswered" :
+          "unanswered for " + d + (d === 1 ? " day" : " days") } };
+    });
+  }
+  // 'invoked' widgets carry a trigger and an expiry; a stale one leaves the shelf.
+  function widgetLive(w){
+    if (!w || !w.expiry) return true;
+    const e = new Date(w.expiry);
+    return isNaN(e) || e.getTime() + 86400000 > Date.now();
+  }
+  /* Band 1. Order: the day's must-lands, then anything that must be seen,
+     then the authored shelf, then the derived views (chase radar, open
+     questions, the recently-done ribbon last). */
   function renderTopWidgets(){
     const el = $("wTop"); if (!el) return;
     const ws = [];
     widgetsArr().forEach((w, wi) => {
-      if (w && (w.anchor === "top" || !w.anchor) && w.type !== "spotlight" &&
+      if (w && widgetLive(w) && (w.anchor === "top" || !w.anchor) && w.type !== "spotlight" &&
           !(w.type === "checklist" && w.props?.actionId)) ws.push({ w, wi }); });
     ws.sort((a, b) => (a.w.type === "banner" ? 0 : 1) - (b.w.type === "banner" ? 0 : 1));
-    el.innerHTML = ws.map(x => widgetHtml(x.w, x.wi)).join("");
+    const derivedTop = [todayWidget()].filter(Boolean);
+    const derivedTail = [chaseRadarWidget(), ...questionWidgets(), ribbonWidget()].filter(Boolean);
+    el.innerHTML =
+      derivedTop.map(w => widgetHtml(w, -1)).join("") +
+      ws.map(x => widgetHtml(x.w, x.wi)).join("") +
+      derivedTail.map(w => widgetHtml(w, -1)).join("");
   }
   function projWidgetsHtml(pid){
     const out = [];
     widgetsArr().forEach((w, wi) => {
-      if (w && w.anchor === pid && w.type !== "spotlight" &&
+      if (w && widgetLive(w) && w.anchor === pid && w.type !== "spotlight" &&
           !(w.type === "checklist" && w.props?.actionId)) out.push(widgetHtml(w, wi)); });
     return out.join("");
   }
@@ -1428,8 +2034,6 @@
   /* ---------- palette subpage (#palette) — display-only gallery ---------- */
   function paletteDemos(){
     const soon = new Date(Date.now() + 3.2 * 86400000).toISOString();
-    const thisMonth = new Date().toISOString().slice(0, 7);
-    const d5 = thisMonth + "-05", d18 = thisMonth + "-18";
     return [
       { name: "Notice", what: "Words that must be seen. Urgent gets the red stamp at the top of the page (one at most, rare); a note is a sticky aside in a project; attached to a plan action it lifts that line on amber with the reason in the margin.",
         w: { type: "notice", props: { text: "Example: kick-offs freeze Wednesday — the feed test must pass first.", tone: "urgent" } } },
@@ -1446,10 +2050,27 @@
         w: { type: "progress", props: { label: "Example: clubs analysed", done: 24, total: 72 } } },
       { name: "Decision", what: "A fork only you can call, as paper slips. Tap one, tap confirm — it gets the red-pen circle and the answer is filed as a note for the next compile.",
         w: { type: "decision", props: { question: "Example: meeting Monday or Tuesday?", options: ["Monday", "Tuesday"], leaning: "Tuesday" } } },
-      { name: "Calendar", what: "A page-a-month grid marking only the dates the board actually knows. Today gets the red-pen circle.",
-        w: { type: "calendar", props: { month: thisMonth, marks: [
-          { date: d5, label: "Kick-offs freeze (example)" },
-          { date: d18, label: "First live broadcast (example)" } ] } } },
+      { name: "Agenda strip", what: "The next seven days at a glance — today's fixed points with times, then the days that actually hold something, with anything further out on a countdown line. Replaces the old month grid; same board-evidenced marks, less wall calendar.",
+        w: { type: "calendar", props: { title: "The next seven days", marks: [
+          { date: new Date().toISOString().slice(0, 10) + "T10:30", label: "Well-being handover (example)" },
+          { date: new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10) + "T14:00", label: "Phil biweekly (example)" },
+          { date: new Date(Date.now() + 13 * 86400000).toISOString().slice(0, 10), label: "First live broadcast (example)" } ] } } },
+      { name: "Today's must-lands", what: "The day's plan as a strip across the top — one dot per task, half-filled for part-done, dashed for waiting. Built from the plan, not stored: a view, not a copy.",
+        w: { type: "today", props: { label: "Today's must-lands", date: "05/08/2026", items: [
+          { text: "Send the club outreach batch (example)", status: "done" },
+          { text: "Feed-ingestion test with YIR (example)", status: "part" },
+          { text: "Chase Phil on TOTW (example)", status: "open", waiting: true } ] } } },
+      { name: "Chase radar", what: "Everything blocked on someone else, with how long it has been sitting. Built from the Waiting bucket and the ownership model — a task whose primary owner isn't Richard reads as a chase, not a do. Red underline past a week.",
+        w: { type: "chaseradar", props: { label: "Waiting on — the chase radar", items: [
+          { what: "Final 24 PhotoShelter portals (example)", why: "with Tom · PhotoShelter setup", days: 3 },
+          { what: "Admin playbook (example)", why: "blocked by send the contacts pages · 72-club directory", days: 9 } ] } } },
+      { name: "Recently done", what: "Completed work stays visible instead of vanishing. The recent ones ride the ribbon; the rest sit on their binder's shelf.",
+        w: { type: "ribbon", props: { label: "Recently done", more: 12, items: [
+          { text: "Colourways to Louis (example)", proj: "NL Cup — YIR broadcast" },
+          { text: "StatsPerform squad data (example)", proj: "72-club directory" } ] } } },
+      { name: "Open question", what: "A question surfaced until it is answered. It cannot be silently resolved — it stays on the shelf, ageing in red, until an answer is written into its thread.",
+        w: { type: "question", props: { topic: "workflow", age: "unanswered for 2 days",
+          text: "If I say 'I spoke to Phil about TOTW' but don't tick the box, do you consider it unticked? (example)" } } },
       { name: "Tally", what: "Counting by hand — gate marks in ink, the fifth stroke in red. For running counts that feel like effort.",
         w: { type: "tally", props: { count: 24, of: 72, label: "clubs chased (example)" } } },
       { name: "Meeting card", what: "The agenda one-pager: when, who's in the room, the points, and a tickable prep list.",
@@ -1557,22 +2178,10 @@
     $("takeMoreBtn").onclick = () => { showTakeHistory = !showTakeHistory; render(); };
 
     renderTopWidgets();
-
-    // plan — Claude-authored list of action ids, ticks write to the action itself
     $("planDateV2").textContent = state.plan?.date ? "· " + state.plan.date : "";
-    $("planList").innerHTML = asArray(state.plan?.actionIds).map(id => {
-      const f = findAction(id);
-      if (!f) return "";
-      const core = '<div class="pitem' + (f.a.done ? " done" : "") + '">' +
-        '<button class="tick" data-adone="' + esc(id) + '" aria-label="Toggle done">' + (f.a.done ? "✓" : "") + '</button>' +
-        '<div><div class="ptext">' + esc(f.a.text) + '</div>' +
-        '<div class="pproj">' + esc(f.p.title) + '</div></div></div>';
-      const sp = spotlightFor(id);
-      const why = sp && (sp.props?.reason || sp.props?.text);
-      return sp ? '<div class="wspot">' + core +
-        (why ? '<div class="why">' + esc(why) + '</div>' : "") +
-        '</div>' : core;
-    }).join("") || '<p class="msg" style="margin:0;text-align:left">No plan authored yet — run a compile.</p>';
+    renderBuckets();
+    renderBinders();
+    renderQA();
 
     // notes — open stickies (editable) above resolved (read-only, struck + resolution)
     const notes = v2Notes();
@@ -1595,23 +2204,6 @@
             '<span class="ts">' + esc(fmtDateTs(n.resolution?.ts)) + '</span></div></div>').join("") : "");
       })();
 
-    // board — projects in authored order; actions now → soon → later, done sink
-    $("board").innerHTML = asArray(state.projects).map(p => {
-      const acts = asArray(p.actions).slice().sort((a,b) =>
-        ((a.done ? 1 : 0) - (b.done ? 1 : 0)) ||
-        ((URG_ORDER[a.urgency] ?? 3) - (URG_ORDER[b.urgency] ?? 3)));
-      return '<div class="proj"><div class="proj-head"><h3>' + esc(p.title) + '</h3>' +
-        '<span class="pstate ' + esc(p.state || "") + '">' + esc(p.state || "") + '</span></div>' +
-        (p.summary ? '<div class="summary">' + esc(p.summary) + '</div>' : "") +
-        projWidgetsHtml(p.id) +
-        acts.map(a =>
-          '<div class="act' + (a.done ? " done" : "") + '">' +
-          '<button class="tick" data-adone="' + esc(a.id) + '" aria-label="Toggle done">' + (a.done ? "✓" : "") + '</button>' +
-          '<div class="atext"' + (a.provenance ? ' title="' + esc(asArray(a.provenance).join(" · ")) + '"' : "") + '>' + esc(a.text) + '</div>' +
-          '<div class="urg ' + esc(a.urgency || "") + '">' + esc(a.urgency || "") + '</div></div>' +
-          checklistsFor(a.id)).join("") +
-        '</div>';
-    }).join("");
 
     // diffs — latest visible, history on tap
     const diffs = asArray(state.diffs).sort((a,b) => String(b.ts).localeCompare(String(a.ts)));
@@ -1636,9 +2228,179 @@
     show("app");
   }
 
+  /* ---------- band 2: the buckets ---------- */
+  function ownerHtml(owner, taskId, subId){
+    const primary = owner?.primary ? personOf(owner.primary) : null;
+    const secondary = asArray(owner?.secondary).map(personOf).filter(Boolean);
+    const key = esc(taskId) + (subId ? ":" + esc(subId) : "");
+    const main = primary
+      ? '<button class="own ' + (isMe(primary.id) ? "me" : "them") + '" data-owner="' + key +
+        '" title="' + esc(primary.name) + ' — tap to hand over">' + esc(primary.initials) + '</button>'
+      : '<button class="own add" data-owner="' + key + '" title="Assign an owner">+</button>';
+    return '<div class="owns">' + main +
+      secondary.map(s => '<span class="own sec" title="' + esc(s.name) + ' — associated">' +
+        esc(s.initials) + '</span>').join("") + '</div>';
+  }
+  function taskCardHtml(f, bucket){
+    const a = f.a, st = taskStatus(a), bl = blockers(a);
+    const subs = asArray(a.subtasks);
+    const ups = asArray(a.updates);
+    const latest = ups.length ? ups[ups.length - 1] : null;
+    const logOpen = openLogTask === a.id;
+    const i = BUCKET_KEYS.indexOf(bucket);
+
+    const dep = bl.length
+      ? '<span class="dep" title="' + esc(bl.map(b => b.text).join(" · ")) + '">blocked ×' + bl.length + '</span>'
+      : (asArray(a.blockedBy).length ? '<span class="dep clear">unblocked</span>' : "");
+    // an attached notice widget lifts this line and puts its reason in the margin
+    const sp = spotlightFor(a.id);
+    const why = sp && widgetLive(sp) && (sp.props?.reason || sp.props?.text);
+
+    return '<div class="tcard s-' + st + (bl.length ? " blocked" : "") + (why ? " spot" : "") +
+      (expandedTask === a.id ? " open" : "") + '" draggable="true" data-task="' + esc(a.id) + '">' +
+      '<div class="trow">' +
+        '<button class="tick3 ' + st + '" data-status="' + esc(a.id) +
+          '" aria-label="Cycle status" title="open → part → done">' + (st === "done" ? "✓" : "") + '</button>' +
+        '<div>' +
+          '<div class="ttitle" data-expand="' + esc(a.id) + '"' +
+            (a.provenance ? ' title="' + esc(asArray(a.provenance).join(" · ")) + '"' : "") + '>' +
+            esc(a.text) + '</div>' +
+          (a.body ? '<div class="tbody">' + esc(a.body) + '</div>' : "") +
+          '<div class="tmeta">' +
+            ownerHtml(a.owners, a.id, null) +
+            '<span class="tproj" title="' + esc(f.p.title) + '">' + esc(f.p.title) + '</span>' +
+            (a.urgency ? '<span class="urg ' + esc(a.urgency) + '">' + esc(a.urgency) + '</span>' : "") +
+            dep +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      (why ? '<div class="tspot">' + esc(why) + '</div>' : "") +
+      (subs.length ? '<div class="subs">' + subs.map(s =>
+        '<div class="sub' + (s.done ? " done" : "") + '">' +
+        '<button class="stick" data-sub="' + esc(a.id) + ':' + esc(s.id) + '" aria-label="Toggle subtask">' +
+          (s.done ? "✓" : "") + '</button>' +
+        '<div class="stext">' + esc(s.text) + '</div>' +
+        ownerHtml(s.owners, a.id, s.id) + '</div>').join("") + '</div>' : "") +
+      checklistsFor(a.id) +
+      // the log: latest update surfaced by default, whole thing on demand
+      (ups.length ? '<div class="tupd">' +
+        (logOpen ? ups : [latest]).map(u => '<div class="uline"><span class="ts">' +
+          esc(fmtDateTs(u.ts)) + '</span>' + esc(u.text) + '</div>').join("") + '</div>' : "") +
+      (updatingTask === a.id
+        ? '<input class="updInput" data-updinput="' + esc(a.id) + '" placeholder="Progress, without a tick… (Enter)">'
+        : '<div class="urow">' +
+          '<button class="tbtn" data-update="' + esc(a.id) + '">+ update</button>' +
+          (ups.length > 1 ? '<button class="tbtn" data-log="' + esc(a.id) + '">' +
+            (logOpen ? "hide log" : "log · " + ups.length) + '</button>' : "") +
+          // refiling by touch — the same move drag-and-drop does with a mouse
+          '<span class="tmove">' +
+            '<button data-move="' + esc(a.id) + ':-1"' + (i <= 0 ? " disabled" : "") + ' aria-label="Move a bucket left">‹</button>' +
+            '<button data-move="' + esc(a.id) + ':1"' + (i >= BUCKET_KEYS.length - 1 ? " disabled" : "") + ' aria-label="Move a bucket right">›</button>' +
+          '</span>' +
+          '</div>') +
+      '</div>';
+  }
+  function renderBuckets(){
+    const cols = { agenda: [], progress: [], waiting: [], done: [] };
+    allTasks().forEach(f => cols[taskBucket(f.a)].push(f));
+    cols.agenda.sort((a, b) => (URG_ORDER[a.a.urgency] ?? 3) - (URG_ORDER[b.a.urgency] ?? 3));
+    cols.progress.sort((a, b) => (URG_ORDER[a.a.urgency] ?? 3) - (URG_ORDER[b.a.urgency] ?? 3));
+    cols.waiting.sort((a, b) => (URG_ORDER[a.a.urgency] ?? 3) - (URG_ORDER[b.a.urgency] ?? 3));
+    // Done never vanishes — it sinks to the shelf, newest first, and only the
+    // recent ones surface here. The rest stay on their binder.
+    cols.done.sort((a, b) => String(b.a.doneTs || "").localeCompare(String(a.a.doneTs || "")));
+
+    $("buckets").innerHTML = BUCKETS.map(b => {
+      const all = cols[b.key];
+      // A long backlog is not a reason for a mile of column: cap it, count what's
+      // under the fold, and let the column open on demand.
+      const cap = COL_CAP[b.key];
+      const full = openCols.has(b.key) || all.length <= cap;
+      const list = full ? all : all.slice(0, cap);
+      const hidden = all.length - list.length;
+      return '<div class="bcol k-' + b.key + '" data-bucket="' + b.key + '">' +
+        '<div class="bhead"><span class="btitle">' + esc(b.label) + '</span>' +
+        (b.sig ? '<span class="bsig">' + esc(b.sig) + '</span>' : "") +
+        '<span class="bn">' + all.length + '</span></div>' +
+        (list.length ? list.map(f => taskCardHtml(f, b.key)).join("")
+          : '<div class="bempty">' + (b.key === "done" ? "nothing yet today" : "empty") + '</div>') +
+        (hidden ? '<button class="bmore" data-colmore="' + b.key + '">+ ' + hidden +
+            (b.key === "done" ? " older" : " more") + '</button>'
+          : (all.length > cap ? '<button class="bmore" data-colmore="' + b.key + '">show fewer</button>' : "")) +
+        '</div>';
+    }).join("");
+  }
+
+  /* ---------- band 3: the binders (no ticks, ever) ---------- */
+  function renderBinders(){
+    const ps = asArray(state.projects);
+    const byProject = {};
+    allTasks().forEach(f => {
+      const k = f.p.id;
+      byProject[k] = byProject[k] || { agenda: 0, progress: 0, waiting: 0, done: [] };
+      const b = taskBucket(f.a);
+      if (b === "done") byProject[k].done.push(f.a); else byProject[k][b]++;
+    });
+    $("spines").innerHTML = ps.map(p => {
+      const c = byProject[p.id] || { agenda: 0, progress: 0, waiting: 0, done: [] };
+      const live = c.agenda + c.progress + c.waiting;
+      return '<button class="spine' + (pulledProject === p.id ? " on" : "") + '" data-spine="' +
+        esc(p.id) + '" title="' + esc(p.title) + '">' +
+        (c.waiting ? '<span class="sdot"></span>' : "") +
+        '<span>' + esc(p.title) + '</span></button>';
+    }).join("");
+    $("binders").innerHTML = ps.map(p => {
+      const c = byProject[p.id] || { agenda: 0, progress: 0, waiting: 0, done: [] };
+      const recent = c.done.slice().sort((a, b) =>
+        String(b.doneTs || "").localeCompare(String(a.doneTs || ""))).slice(0, 3);
+      return '<div class="binder' + (pulledProject === p.id ? " on" : "") + '" id="binder-' + esc(p.id) + '">' +
+        '<div class="bhd"><h3>' + esc(p.title) + '</h3>' +
+        '<span class="pstate ' + esc(p.state || "") + '">' + esc(p.state || "") + '</span></div>' +
+        (p.summary ? '<div class="bsum">' + esc(p.summary) + '</div>' : "") +
+        '<div class="bcounts">' +
+          '<span><b>' + c.agenda + '</b> on the agenda</span>' +
+          '<span><b>' + c.progress + '</b> in progress</span>' +
+          '<span><b>' + c.waiting + '</b> waiting</span>' +
+          '<span><b>' + c.done.length + '</b> done</span></div>' +
+        (recent.length ? '<div class="bshelf"><div class="blab">Recently done</div>' +
+          recent.map(a => '<p>' + esc(a.text) + '</p>').join("") + '</div>' : "") +
+        projWidgetsHtml(p.id) +
+        '</div>';
+    }).join("");
+  }
+
+  /* ---------- Q&A: nothing vanishes silently ---------- */
+  function renderQA(){
+    const cs = convsArr().sort((a, b) => String(b.opened || "").localeCompare(String(a.opened || "")));
+    const open = cs.filter(c => c.state === "open");
+    const rest = cs.filter(c => c.state !== "open");
+    $("qBadge").textContent = open.length;
+    $("qBadge").classList.toggle("hidden", !open.length);
+    const threadHtml = c => asArray(c.thread).map(t =>
+      '<div class="qmsg' + (t.author === "claude" ? " claude" : "") + '">' + esc(t.text) + '</div>').join("");
+    $("qaList").innerHTML =
+      open.map(c => {
+        const d = daysSince(c.opened || asArray(c.thread)[0]?.ts);
+        return '<div class="qitem open"><div class="qtopic">' + esc(c.topic || "question") + '</div>' +
+          threadHtml(c) +
+          '<div class="qwait">open' + (d === null ? "" : d === 0 ? " · asked today" :
+            " · " + d + (d === 1 ? " day" : " days")) + ' — not answered yet</div></div>';
+      }).join("") +
+      (rest.length
+        ? '<button class="filedToggle" data-qtoggle>' +
+          (showAnsweredQs ? "hide answered" : "answered · " + rest.length) + '</button>' +
+          (showAnsweredQs ? rest.map(c =>
+            '<div class="qitem"><div class="qtopic">' + esc(c.topic || "question") + ' · ' + esc(c.state) + '</div>' +
+            threadHtml(c) +
+            (c.state === "answered"
+              ? '<div class="urow" style="margin-top:6px"><button class="tbtn" data-qclose="' +
+                esc(c.id) + '">close</button></div>' : "") +
+            '</div>').join("") : "")
+        : "") +
+      (!cs.length ? '<div class="bempty">No questions. Ask one and it stays open until it\'s answered.</div>' : "");
+  }
+
   function wireV2(){
-    document.querySelectorAll("[data-adone]").forEach(b =>
-      b.onclick = () => toggleActionDone(b.dataset.adone));
     document.querySelectorAll("[data-wcheck]").forEach(b =>
       b.onclick = () => toggleWidgetItem(b.dataset.wcheck));
     document.querySelectorAll("[data-wanswer]").forEach(b =>
@@ -1657,6 +2419,74 @@
       ta.onblur = () => { if (done) return; done = true;
         saveNoteEdit(ta.dataset.noteedit, ta.value); };
     });
+
+    /* --- v3 board --- */
+    document.querySelectorAll("[data-status]").forEach(b =>
+      b.onclick = () => cycleStatus(b.dataset.status));
+    document.querySelectorAll("[data-expand]").forEach(el =>
+      el.onclick = () => { expandedTask = expandedTask === el.dataset.expand ? null : el.dataset.expand; render(); });
+    document.querySelectorAll("[data-move]").forEach(b =>
+      b.onclick = () => { const [id, d] = b.dataset.move.split(":"); moveTask(id, +d); });
+    document.querySelectorAll("[data-sub]").forEach(b =>
+      b.onclick = () => { const [id, sid] = b.dataset.sub.split(":"); toggleSubtask(id, sid); });
+    document.querySelectorAll("[data-owner]").forEach(b =>
+      b.onclick = () => { const [id, sid] = b.dataset.owner.split(":"); cycleOwner(id, sid || null); });
+    document.querySelectorAll("[data-update]").forEach(b =>
+      b.onclick = () => { updatingTask = b.dataset.update; render(); });
+    document.querySelectorAll("[data-log]").forEach(b =>
+      b.onclick = () => { openLogTask = openLogTask === b.dataset.log ? null : b.dataset.log; render(); });
+    document.querySelectorAll("[data-updinput]").forEach(inp => {
+      inp.focus();
+      let committed = false;
+      const commit = () => { if (committed) return; committed = true;
+        inp.onblur = null; inp.onkeydown = null; appendTaskUpdate(inp.dataset.updinput, inp.value); };
+      inp.onkeydown = e => {
+        if (e.key === "Enter") commit();
+        if (e.key === "Escape") { if (committed) return; committed = true;
+          inp.onblur = null; inp.onkeydown = null; updatingTask = null; render(); }
+      };
+      inp.onblur = commit;
+    });
+
+    // drag-and-drop refiling across all buckets
+    document.querySelectorAll("[data-task]").forEach(el => {
+      el.ondragstart = e => {
+        if (e.target.closest("button,input")) { e.preventDefault(); return; }
+        dragTaskId = el.dataset.task;
+        el.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+        try { e.dataTransfer.setData("text/plain", dragTaskId); } catch(err){}
+      };
+      el.ondragend = () => { el.classList.remove("dragging");
+        document.querySelectorAll(".bcol.over").forEach(c => c.classList.remove("over")); };
+    });
+    document.querySelectorAll("[data-bucket]").forEach(col => {
+      col.ondragover = e => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; col.classList.add("over"); };
+      col.ondragleave = () => col.classList.remove("over");
+      col.ondrop = e => {
+        e.preventDefault(); col.classList.remove("over");
+        const id = dragTaskId || (e.dataTransfer && e.dataTransfer.getData("text/plain"));
+        dragTaskId = null;
+        if (id) setTaskBucket(id, col.dataset.bucket);
+      };
+    });
+
+    document.querySelectorAll("[data-colmore]").forEach(b =>
+      b.onclick = () => { const k = b.dataset.colmore;
+        if (openCols.has(k)) openCols.delete(k); else openCols.add(k);
+        render(); });
+    document.querySelectorAll("[data-spine]").forEach(b =>
+      b.onclick = () => {
+        pulledProject = pulledProject === b.dataset.spine ? null : b.dataset.spine;
+        const target = pulledProject;
+        render();
+        if (target) { const el = $("binder-" + target);
+          if (el) el.scrollIntoView({ behavior: "smooth", block: "center" }); }
+      });
+    document.querySelectorAll("[data-qtoggle]").forEach(b =>
+      b.onclick = () => { showAnsweredQs = !showAnsweredQs; render(); });
+    document.querySelectorAll("[data-qclose]").forEach(b =>
+      b.onclick = () => closeConversation(b.dataset.qclose));
   }
 
   /* ---------- render ---------- */
@@ -1870,6 +2700,37 @@
     return "https://claude.ai/new?q=" + encodeURIComponent(prompt);
   }
 
+  /* ---------- Q&A panel ---------- */
+  const ANSWER_URL = "https://morning-walks-419435526393.europe-west1.run.app/answer/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
+  $("qaAskBtn").addEventListener("click", () => {
+    const inp = $("qaInput");
+    if (!inp.value.trim()) return;
+    askQuestion(inp.value);
+    inp.value = "";
+  });
+  $("qaInput").addEventListener("keydown", e => { if (e.key === "Enter") $("qaAskBtn").click(); });
+  // Deliberately on demand: the silent hourly file pass has no channel to reply,
+  // so it never answers. This does, and writes the answer into the thread.
+  $("qaAnswerBtn").addEventListener("click", async () => {
+    const btn = $("qaAnswerBtn"), st = $("qaStatus");
+    btn.disabled = true; st.textContent = "answering…";
+    try {
+      const r = await fetch(ANSWER_URL, { method: "POST" });
+      const text = await r.text();
+      if (!r.ok) throw new Error(text || ("HTTP " + r.status));
+      st.textContent = "";
+      toast(text || "Answered.");
+    } catch (e) {
+      st.textContent = "";
+      toast("Answer pass not live — opening a Claude chat instead.");
+      window.open("https://claude.ai/new?q=" + encodeURIComponent(
+        "Read the walk reference and answer every open question in conversations[] — " +
+        "write each answer into its thread with answerQuestion. Never mark one answered without an answer."),
+        "_blank", "noopener");
+    }
+    btn.disabled = false;
+  });
+
   /* ---------- Mark It ---------- */
   const REVIEW_URL = "https://morning-walks-419435526393.europe-west1.run.app/review/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
   let toastTimer;
@@ -1896,13 +2757,20 @@
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
     return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
   }
-  // must mirror the server's v2Signature exactly
+  // must mirror the server's v2Signature exactly (v116: status + bucket joined
+  // the tick map, so a mid-state move or a refile counts as a change)
+  function stateMaps(){
+    const done = {}, status = {}, bucket = {};
+    asArray(state?.projects).forEach(p => asArray(p.actions).forEach(a => {
+      done[a.id] = !!a.done; status[a.id] = taskStatus(a); bucket[a.id] = a.bucket || "";
+    }));
+    return { done, status, bucket };
+  }
   async function clientSignature(){
     const notes = asArray(state?.notes).filter(n => n.state === "open")
       .map(n => ({ id: n.id, text: n.text }));
-    const done = {};
-    asArray(state?.projects).forEach(p => asArray(p.actions).forEach(a => { done[a.id] = !!a.done; }));
-    return sha256hex(JSON.stringify({ notes, done, date: state?.plan?.date || "" }));
+    const { done, status, bucket } = stateMaps();
+    return sha256hex(JSON.stringify({ notes, done, status, bucket, date: state?.plan?.date || "" }));
   }
   async function updateMarkEst(){
     const el = $("markEst"); if (!el || !state || !state.projects) return;
@@ -1915,10 +2783,13 @@
       let countTxt = "";
       if (reviewState && reviewState.basis) {
         const b = reviewState.basis; let c = 0;
-        const doneNow = {};
-        asArray(state.projects).forEach(p => asArray(p.actions).forEach(a => { doneNow[a.id] = !!a.done; }));
-        new Set([...Object.keys(doneNow), ...Object.keys(b.done || {})]).forEach(id => {
-          if (!!doneNow[id] !== !!(b.done || {})[id]) c++;
+        const now = stateMaps();
+        // one task, one change — however many of its three fields moved
+        new Set([...Object.keys(now.done), ...Object.keys(b.done || {})]).forEach(id => {
+          const moved = !!now.done[id] !== !!(b.done || {})[id] ||
+            (b.status ? (now.status[id] || "") !== (b.status[id] || "") : false) ||
+            (b.bucket ? (now.bucket[id] || "") !== (b.bucket[id] || "") : false);
+          if (moved) c++;
         });
         const openNow = asArray(state.notes).filter(n => n.state === "open");
         const nowHashes = {};

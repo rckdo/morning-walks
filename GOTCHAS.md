@@ -1,6 +1,6 @@
 # Walk Reference — Gotchas & Operating Notes
 
-Operational reference for the Morning Walk planner (desk app + walk-mcp server + Walk Reference MCP connector). Read this when a session misbehaves before re-diagnosing from scratch. Last updated 03/08/2026.
+Operational reference for the Morning Walk planner (desk app + walk-mcp server + Walk Reference MCP connector). Read this when a session misbehaves before re-diagnosing from scratch. Last updated 05/08/2026 (server v116 / desk v118 — the v3 board architecture).
 
 ---
 
@@ -70,6 +70,58 @@ Optional `expectedLastUpdated` on any patch: if set and the board moved since yo
 
 ---
 
+## 3a. The three object types (v3, server v116 / desk v118)
+
+The whole point of the redesign: when something new arrives there is **exactly one right place for it**, and it's obvious.
+
+| type | layer | rule | has ticks? |
+|---|---|---|---|
+| **task** (an action inside a project) | doing | *if it can be ticked, it's a task* | yes — the only ticks on the page |
+| **project** | thinking | *if it's a standing state-of-play, it's a project* | **never** |
+| **widget** | presentation | *if it's just a view, it's a widget* | owns no data at all |
+
+A project stands on its own: it keeps its summary card even with nothing in its buckets.
+
+### Buckets
+
+`On the agenda → In progress → Done`, with **In progress split in two** because they are different signals:
+
+- **In progress (mine)** — the ball is in Richard's court. Signal: **act**.
+- **Waiting** — blocked on someone else. Signal: **chase**.
+
+`bucket` is stored where a task has been refiled, and **derived** otherwise. The two derivations that matter: a task **blocked by an unfinished predecessor**, or one whose **primary owner isn't Richard**, both read as Waiting. So an old v2 action with no v3 fields still lands in the right column.
+
+`done` remains the **source of truth**: `done === (status === 'done')`, re-synced server-side on every write, so status/done/bucket can't drift.
+
+### v3 patch ops
+
+| op | shape | effect |
+|----|-------|--------|
+| `setStatus` | `{op:'setStatus', taskId:'a3', status:'part'}` | `open` / `part` / `done`. `part` = not done but genuinely in flight |
+| `appendActionUpdate` | `{op:'appendActionUpdate', taskId:'a3', text:'…'}` | progress note **without** a tick (append-only) |
+| `setBucket` | `{op:'setBucket', taskId:'a3', bucket:'waiting'}` | refile; starts the chase clock on `waiting` |
+| `setTaskBody` | `{op:'setTaskBody', taskId:'a3', body:'…'}` | a task is a title **and** a body |
+| `setOwner` | `{op:'setOwner', taskId:'a3', subtaskId:'s1', primary:'Tom', secondary:['Richard']}` | layered ownership — one primary (the doer) + any number of secondaries. Works at task **or** subtask level. `clear:true` strips it |
+| `addSubtask` / `tickSubtask` | `{op:'addSubtask', taskId:'a3', text:'…', primary:'Tom'}` | subtasks, individually ownable |
+| `setBlockedBy` | `{op:'setBlockedBy', taskId:'a61', blockedBy:['a60']}` | dependency-aware ordering (not a Gantt). `[]` clears |
+| `askQuestion` | `{op:'askQuestion', topic:'…', text:'…'}` | opens a conversation; stays **open** until answered |
+| `answerQuestion` | `{op:'answerQuestion', convId:'c1', text:'…'}` | writes the reply into the thread, sets `answered` |
+| `setConversationState` | `{op:'setConversationState', convId:'c1', state:'closed'}` | refuses `answered` if no answer is in the thread |
+| `addWidget` / `retireWidget` | `{op:'addWidget', type:'countdown', props:{…}, lifespan:'invoked', expiry:'2026-08-18'}` | Claude curates the shelf; `invoked` widgets expire off it |
+| `addPerson` | `{op:'addPerson', name:'Tom Beere'}` | rarely needed — `setOwner` registers people on first use |
+
+### Questions are never silently resolved
+
+A question filed as a conversation stays `open`, ageing in red on the desk, until an answer is **written into its thread**. Nothing marks one answered without an answer — `setConversationState` refuses it, and the answer pass leaves anything it can't genuinely answer open.
+
+Answers come from **a chat**, or the on-demand **`/answer/<REVIEW_SECRET>`** pass (the desk's "answer open questions" button). Deliberately **not** the silent hourly file pass, which has no channel to reply.
+
+### Change detection widened
+
+The review signature now covers per-task **status and bucket**, not just the tick map — so moving a task to `part`, or refiling it into Waiting, wakes a review the way a tick does. The desk mirrors the signature exactly; if you change one, change both (`v2Signature` in `server.js`, `clientSignature` in `index.html`).
+
+---
+
 ## 4. Standing rules for any session (compile or mid-day)
 
 - **Always `get_reference` immediately before any write.** The desk app and scheduled passes write too; a stale snapshot clobbers their edits.
@@ -88,10 +140,17 @@ Optional `expectedLastUpdated` on any patch: if set and the board moved since yo
 - **Firebase RTDB node:** `walkReference` (history archived under `walkReferenceHistory`)
 - **Server deploys via Cloud Run** using Application Default Credentials — no key file needed when deployed inside the project.
 - **After editing `walk-mcp/server.js`:** commit → Cloud Run redeploys. Rules/app changes are separate.
+- **Endpoints on the service:** `/mcp/<SECRET>` (MCP tools), `/review/<REVIEW_SECRET>` (scheduled + "mark now" judgement), `/answer/<REVIEW_SECRET>` (on-demand open-question answers, v116+), `/assist/<REVIEW_SECRET>` (Firebase-authenticated tools, e.g. the email composer).
+- **RTDB paths the desk writes directly:** `walkReference/projects/<i>/actions/<j>` (status, bucket, updates, owners, subtasks, waitingSince), `walkReference/notes`, `walkReference/conversations`, `walkReference/people`, `walkReference/widgets/<i>/props/...`, `walkReference/meta`. If a write returns `permission_denied`, check the rules cover the path — `conversations` and `people` are new in v118.
 
 ---
 
-## 6. Current known open items (as of 03/08/2026)
+## 6. Current known open items (as of 05/08/2026)
 
 - **a26 (server v114):** built and — per this session — the connector already exposes `patch_reference`, so it appears deployed. Confirm end-to-end on the next real patch (watch the desk app update).
 - **Summary drifts queued for compile:** Cup summary calls the YIR fixture-list question open against a ticked action; well-being summary still reads "Martin" (should be **Martyn**); content-strategy capacity line (n5) not yet folded into the summary.
+- **v3 rollout (server v116 / desk v118):** additive — no migration is required and nothing needs rewriting. The board renders correctly as-is; `status`, `bucket`, `owners`, `updates`, `subtasks` and `blockedBy` fill in as tasks are touched. Two things do want a compile pass to land properly:
+  1. **Register the people** (`setOwner` on the tasks that are actually someone else's — Tom's portals, Phil's decisions) so the ownership circles and the chase radar carry real names rather than deriving from the Waiting rule alone.
+  2. **Project summaries are long** — the spec calls for a rolling ~75 words per binder; several currently run to a paragraph or more. That's an authoring job at compile, not a desk change.
+- **a62 — "mark as done" in the contacts-pages editor:** NOT built here. That editor is part of the NL Tools portal, a different codebase; nothing in this repo touches it. It remains outstanding as a task on the board.
+- **Deferred, unchanged:** archive the v1 mirrors (`fronts`, `todaysPlan`, `ideas`, `richardsNotes`, `claudesTake` still sit on the node); diff-id collisions (`d<n>` derived from array length can repeat after trimming).
