@@ -1,0 +1,136 @@
+{
+  "_comment": [
+    "Walk Reference — Realtime Database rules. v118 (05/08/2026).",
+    "",
+    "Deny by default, then grant leaf by leaf. The boundary this enforces is the",
+    "one the whole system rests on: CLAUDE AUTHORS, THE APP ANNOTATES. Claude-",
+    "authored content — a task's text, urgency and provenance, a project's title",
+    "and summary, the plan, the take, the diffs, a note's resolution — is",
+    "READ-ONLY to the desk app and is only ever written by the server through the",
+    "admin SDK, which bypasses these rules. The desk may only touch the fields it",
+    "owns: what Richard did, who holds it, and what he wrote himself.",
+    "",
+    "Adding a field to the desk app therefore means adding a line here, or the",
+    "write returns permission_denied. Note that a multi-path update() is checked",
+    "per child key: ref(action).update({done, status}) needs BOTH done and status",
+    "granted, or the whole update is refused.",
+    "",
+    "Deploy: paste into console -> Realtime Database -> Rules -> Publish",
+    "(or firebase deploy --only database). This file is the source of record."
+  ],
+
+  "rules": {
+    ".read": false,
+    ".write": false,
+
+    "walkReference": {
+      ".read": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+      ".write": false,
+
+      "notes": {
+        ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+      },
+
+      "conversations": {
+        ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+      },
+
+      "people": {
+        ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+      },
+
+      "todaysPlan": {
+        ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+      },
+
+      "richardsNotes": {
+        ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+      },
+
+      "ideas": {
+        ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+      },
+
+      "projects": {
+        "$pi": {
+          "actions": {
+            "$ai": {
+              "done": {
+                ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+              },
+              "status": {
+                ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+                ".validate": "newData.isString() && newData.val().matches(/^(open|part|done)$/)"
+              },
+              "bucket": {
+                ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+                ".validate": "newData.isString() && newData.val().matches(/^(agenda|progress|waiting|done)$/)"
+              },
+              "doneTs": {
+                ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+                ".validate": "newData.isString()"
+              },
+              "waitingSince": {
+                ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+                ".validate": "newData.isString()"
+              },
+              "updates": {
+                ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+                "$ui": {
+                  ".validate": "newData.hasChildren(['text', 'ts'])"
+                }
+              },
+              "owners": {
+                ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+              },
+              "subtasks": {
+                "$si": {
+                  "done": {
+                    ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+                  },
+                  "owners": {
+                    ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+
+      "widgets": {
+        "$wi": {
+          "props": {
+            "answer": {
+              ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+            },
+            "items": {
+              "$ii": {
+                "done": {
+                  ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+                }
+              }
+            }
+          }
+        }
+      },
+
+      "meta": {
+        "lastUpdated": {
+          ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+        },
+        "updatedBy": {
+          ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+        }
+      }
+    },
+
+    "apiUsage": {
+      ".read": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+    },
+
+    "reviewState": {
+      ".read": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
+    }
+  }
+}

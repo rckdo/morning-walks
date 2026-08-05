@@ -1,10 +1,24 @@
 /*
   MORNING WALK — MCP SERVER + AMBIENT REVIEWER
-  v116.0 — 05/08/2026
+  v116.1 — 05/08/2026
   (Supersedes v78 / v82 / v87 / v88 / v90 / v94 / v114 / v115 — deploy this
    one; earlier server files from this build are obsolete. See VERSIONING.md.)
 
   Changelog:
+  v116.1 — Bounded archive. Every write used to stash a full copy of the
+           board under walkReferenceHistory with nothing pruning it — 7.66 MB
+           across 153 snapshots against a live board of 133 KB, 98% of the
+           database, growing without bound. Now only whole-document writes
+           (compile, review pass, answer pass) take a full snapshot, capped at
+           the newest 20; patch_reference records a DELTA under
+           walkReferenceOps instead — the ops, what they did, and the prior
+           state of just the objects they name (~2.9 KB against 133 KB, and a
+           readable audit trail rather than another copy of the board), capped
+           at the newest 200. Pruning walks a small key index so it never
+           reads a snapshot back to decide what to drop; the index backfills
+           itself once from a pre-v116.1 archive. Archive keys are nudged
+           forward on collision so two writes in the same millisecond can no
+           longer overwrite each other. Ceiling ~3.2 MB, flat.
   v116.0 — The board architecture redesign (v3 spec, a64). Three object types
            kept clean: TASKS do, PROJECTS think, WIDGETS present. Additive —
            every v2 board keeps working untouched; v3 fields are read where
@@ -174,6 +188,89 @@ function ensurePerson(ref, nameOrId) {
   return p.id;
 }
 
+/* ========================== Archive & pruning ==========================
+   Before v116.1 EVERY write — including a two-field surgical patch — stashed a
+   full copy of the board under walkReferenceHistory, and nothing ever pruned it.
+   Five days of use produced 7.66 MB against a live board of 133 KB: 98% of the
+   database was archive, growing without bound.
+
+   Two changes, cause then symptom:
+
+   (1) Only a write that REPLACES THE WHOLE DOCUMENT still takes a full snapshot
+       — the daily compile, the review pass, the answer pass. Those are the ones
+       you would actually roll back to. patch_reference applies only its listed
+       ops, so it records a DELTA instead: the ops, what they did, and the prior
+       state of just the objects they touched. Same recoverability, a fraction of
+       the bytes, and a far more readable audit trail.
+
+   (2) Both stores are capped. Pruning walks a tiny key index rather than the
+       archive itself, so working out what to delete never reads a snapshot back.
+       The index is backfilled once from a pre-v116.1 archive that hasn't got one. */
+
+const OPS = "walkReferenceOps";
+const HISTORY_KEEP = 20;    // full snapshots — ~2.6 MB ceiling at today's board size
+const OPS_KEEP = 200;       // delta records — kilobytes each
+
+const idxPath = node => node + "Index";
+
+// Keys are timestamps so they sort oldest-first, but two writes inside the same
+// millisecond would land on the same key and one would silently overwrite the
+// other. Nudge forward instead: strictly increasing, still sorts correctly.
+let lastArchiveKey = 0;
+function archiveKey() {
+  const now = Date.now();
+  lastArchiveKey = now > lastArchiveKey ? now : lastArchiveKey + 1;
+  return String(lastArchiveKey);
+}
+
+// Append `value` at `node/<key>`, then drop the oldest so `keep` survive.
+async function remember(node, key, value, keep) {
+  await db.ref(node + "/" + key).set(value);
+  let idx = (await db.ref(idxPath(node)).get()).val();
+  if (!idx) {
+    // One-time backfill: a pre-v116.1 archive has no index, so read it once to
+    // learn its keys (the values are discarded) and let the cap start applying.
+    idx = {};
+    (await db.ref(node).get()).forEach(child => { idx[child.key] = true; });
+  }
+  idx[key] = true;
+  const keys = Object.keys(idx).sort();
+  const drop = keys.slice(0, Math.max(0, keys.length - keep));
+  for (let i = 0; i < drop.length; i += 20) {
+    await Promise.all(drop.slice(i, i + 20).map(k => db.ref(node + "/" + k).remove()));
+  }
+  drop.forEach(k => { delete idx[k]; });
+  await db.ref(idxPath(node)).set(idx);
+}
+
+const archiveFull = board => remember(HISTORY, archiveKey(), board, HISTORY_KEEP)
+  .catch(e => console.error("archiveFull failed", e));
+
+// The prior state of only what the ops name — enough to reverse a patch by hand.
+function touchedBefore(board, operations) {
+  const ids = new Set();
+  operations.forEach(o => ["actionId", "taskId", "noteId", "convId", "widgetId"]
+    .forEach(k => { if (o && o[k]) ids.add(String(o[k])); }));
+  const before = {};
+  asArray(board.projects).forEach(p => asArray(p.actions).forEach(a => {
+    if (a && ids.has(String(a.id))) before[a.id] = a; }));
+  asArray(board.notes).forEach(n => { if (n && ids.has(String(n.id))) before[n.id] = n; });
+  asArray(board.conversations).forEach(c => { if (c && ids.has(String(c.id))) before[c.id] = c; });
+  asArray(board.widgets).forEach(w => { if (w && ids.has(String(w.id))) before[String(w.id)] = w; });
+  if (operations.some(o => o && o.op === "setPlan")) before._plan = board.plan || null;
+  if (operations.some(o => o && o.op === "setTake")) before._take = board.take || null;
+  return before;
+}
+
+const archiveDelta = (board, operations, applied) =>
+  remember(OPS, archiveKey(), {
+    ts: new Date().toISOString(),
+    priorStamp: board?.meta?.lastUpdated || null,
+    applied: applied.slice(0, 40),
+    ops: operations.slice(0, 40),
+    before: touchedBefore(board, operations)
+  }, OPS_KEEP).catch(e => console.error("archiveDelta failed", e));
+
 // Self-kept spend tally: every Anthropic response reports its own token usage;
 // accumulate it in /apiUsage so the desk app can show a live meter.
 function recordUsage(u) {
@@ -229,7 +326,8 @@ function buildServer() {
         }
       }
 
-      if (current.exists()) await db.ref(HISTORY + "/" + Date.now()).set(current.val());
+      // Full rewrite — this is exactly the write worth a full snapshot.
+      if (current.exists()) await archiveFull(current.val());
 
       // v3: done is the source of truth. A full rewrite that sets one and not the
       // other would let them drift, so re-sync every task before the write.
@@ -679,7 +777,8 @@ function buildServer() {
       }
 
       // Archive prior state, stamp, and write back the (freshly-read, now-mutated) board.
-      await db.ref(HISTORY + "/" + Date.now()).set(snap.val());
+      // Surgical: record what changed, not another copy of the whole board.
+      await archiveDelta(snap.val(), operations, applied);
       ref.meta = ref.meta || {};
       ref.meta.lastUpdated = now;
       ref.meta.updatedBy = "claude";
@@ -792,7 +891,7 @@ async function runReview() {
   const now = new Date().toISOString();
 
   // Archive, then merge the verdict into the reference.
-  await db.ref(HISTORY + "/" + Date.now()).set(ref);
+  await archiveFull(ref);
 
   const tasks = asArray(ref.todaysPlan?.tasks);
   tasks.forEach(t => {
@@ -913,7 +1012,7 @@ async function runReviewV2(ref) {
   catch { return { status: 502, body: "Review output was not valid JSON — nothing written." }; }
 
   const now = new Date().toISOString();
-  await db.ref(HISTORY + "/" + Date.now()).set(ref);
+  await archiveFull(ref);
 
   let changed = 0;
   const diffs = asArray(ref.diffs);
@@ -1033,7 +1132,7 @@ async function runAnswerPass() {
   catch { return { status: 502, body: "Answer output was not valid JSON — nothing written." }; }
 
   const now = new Date().toISOString();
-  await db.ref(HISTORY + "/" + Date.now()).set(ref);
+  await archiveFull(ref);
 
   let answered = 0;
   const convs = asArray(ref.conversations);

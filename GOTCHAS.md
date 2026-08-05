@@ -122,6 +122,32 @@ The review signature now covers per-task **status and bucket**, not just the tic
 
 ---
 
+## 3b. Database rules — `database.rules.json` (v118)
+
+**The rules are deny-by-default and granted leaf by leaf. A field the app writes that isn't listed returns `permission_denied`.** The file in the repo root is the source of record; deploy it by pasting into console → Realtime Database → Rules → Publish (or `firebase deploy --only database`). Editing it here changes nothing on its own.
+
+What the granularity is protecting: **Claude authors, the app annotates.** A task's text, urgency and provenance, a project's title and summary, the plan, the take, the diffs and a note's resolution are read-only to the desk and only ever written by the server through the admin SDK, which bypasses rules entirely. The desk may only touch what Richard did (`done`, `status`, `bucket`, `updates`, subtask ticks), who holds it (`owners`), and what he wrote himself (`notes`, `conversations`).
+
+**The trap:** a multi-path `update()` is checked **per child key**. `ref(action).update({done, status})` needs *both* `done` and `status` granted or the whole update is refused — which is why v118's tick, writing `status`/`done`/`doneTs` together, fails outright under pre-v118 rules that only granted `done`. Adding a field to the desk means adding a line to the rules.
+
+---
+
+## 3c. Archive growth — why history is capped
+
+Every write used to stash a full copy of the board under `walkReferenceHistory`, and nothing pruned it. By 05/08 that was **7.66 MB across 153 snapshots against a live board of 133 KB — 98% of the database**, growing without bound.
+
+Server v116.1 fixes cause and symptom:
+
+- **Only whole-document writes take a full snapshot** — the daily compile (`update_reference`), the review pass and the answer pass. Those are what you'd actually roll back to.
+- **`patch_reference` records a delta instead** under `walkReferenceOps`: the ops, what they did, and the prior state of just the objects they name. ~2.9 KB against 133 KB, and a far more readable audit trail than another copy of the board.
+- **Both are capped** — newest 20 snapshots, newest 200 deltas. Pruning walks a small key index (`…Index` nodes), so working out what to delete never reads a snapshot back.
+
+Ceiling is now ~3.2 MB and flat. The index backfills itself on the first archive after the upgrade, which is also when the existing 153 snapshots get trimmed to 20 — expect one slower write, once.
+
+Archive keys are timestamps nudged forward on collision, so two writes in the same millisecond can't overwrite each other.
+
+---
+
 ## 4. Standing rules for any session (compile or mid-day)
 
 - **Always `get_reference` immediately before any write.** The desk app and scheduled passes write too; a stale snapshot clobbers their edits.
@@ -137,7 +163,7 @@ The review signature now covers per-task **status and bucket**, not just the tic
 - **Repo:** `morning-walks` (GitHub Pages serves the desk app `index.html` from the root)
 - **Server folder:** `walk-mcp/` inside that repo — holds `server.js`, deployed to Cloud Run
 - **Desk app (live):** https://rckdo.github.io/morning-walks/
-- **Firebase RTDB node:** `walkReference` (history archived under `walkReferenceHistory`)
+- **Firebase RTDB node:** `walkReference`. Full snapshots archive under `walkReferenceHistory` (capped at 20), patch deltas under `walkReferenceOps` (capped at 200), each with a small `…Index` sibling used for pruning. Rules live in `database.rules.json` at the repo root — see §3b; a Firebase data export never contains them.
 - **Server deploys via Cloud Run** using Application Default Credentials — no key file needed when deployed inside the project.
 - **After editing `walk-mcp/server.js`:** commit → Cloud Run redeploys. Rules/app changes are separate.
 - **Endpoints on the service:** `/mcp/<SECRET>` (MCP tools), `/review/<REVIEW_SECRET>` (scheduled + "mark now" judgement), `/answer/<REVIEW_SECRET>` (on-demand open-question answers, v116+), `/assist/<REVIEW_SECRET>` (Firebase-authenticated tools, e.g. the email composer).
