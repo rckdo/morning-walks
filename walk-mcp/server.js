@@ -1,10 +1,33 @@
 /*
   MORNING WALK — MCP SERVER + AMBIENT REVIEWER
-  v115.0 — 03/08/2026
-  (Supersedes v78 / v82 / v87 / v88 / v90 / v94 / v114 — deploy this one;
-   earlier server files from this build are obsolete. See VERSIONING.md.)
+  v116.0 — 05/08/2026
+  (Supersedes v78 / v82 / v87 / v88 / v90 / v94 / v114 / v115 — deploy this
+   one; earlier server files from this build are obsolete. See VERSIONING.md.)
 
   Changelog:
+  v116.0 — The board architecture redesign (v3 spec, a64). Three object types
+           kept clean: TASKS do, PROJECTS think, WIDGETS present. Additive —
+           every v2 board keeps working untouched; v3 fields are read where
+           present and derived where absent.
+           Tasks gain: body (content, not just a one-liner), status
+           open|part|done (done stays the source of truth — done ===
+           status==='done', synced server-side on every write), updates[]
+           (append-only progress log), bucket agenda|progress|waiting|done,
+           owners {primary, secondary[]} at task AND subtask level,
+           subtasks[], blockedBy[] (dependency links — a task blocked by an
+           unfinished predecessor reads as Waiting).
+           New ops: setStatus, appendActionUpdate, setBucket, setTaskBody,
+           setOwner, addSubtask, tickSubtask, setBlockedBy, addPerson,
+           askQuestion, answerQuestion, setConversationState, addWidget,
+           retireWidget. addAction extended (status/bucket/body/owners/
+           blockedBy/subtasks). tickAction now keeps status+bucket in sync.
+           conversations[] is first-class: a question is NEVER silently
+           resolved — it stays open until an answer is written into its
+           thread. Answers come from a chat or the new on-demand
+           /answer/<secret> pass, never the silent hourly file pass (which
+           has no channel to reply). Change-detection widened from the tick
+           map to per-task status+bucket, so a mid-state move or a refile
+           wakes a review the way a tick does.
   v115.0 — The light-file pass. patch_reference gains addAction (create an
            action under a project, server-assigned id, optional drop onto
            today's plan) and setTake (replace the take in one op) — so a
@@ -102,6 +125,55 @@ admin.initializeApp({
 const db = admin.database();
 const asArray = v => Array.isArray(v) ? v : Object.values(v || {});
 
+/* ===================== v3 object model (shared helpers) =====================
+   Three object types, kept clean:
+     tasks    — the DOING layer  (an action inside a project; status, buckets,
+                updates, owners, subtasks, dependencies)
+     projects — the THINKING layer (a binder + rolling summary; no ticks, ever)
+     widgets  — the PRESENTATION layer (own no data; point at a task/project)
+   Everything below is additive: a v2 action with only {id,text,urgency,done}
+   reads correctly, because status and bucket are DERIVED when absent. */
+
+const STATUSES = ["open", "part", "done"];
+const BUCKETS  = ["agenda", "progress", "waiting", "done"];
+
+const taskStatus = a => STATUSES.includes(a?.status) ? a.status : (a?.done ? "done" : "open");
+
+// done is the source of truth: done === (status === 'done'). Called after every
+// write that could move either one, so the two can never drift apart.
+function syncStatus(a, status) {
+  const was = taskStatus(a);
+  a.status = (status && STATUSES.includes(status)) ? status : was;
+  a.done = a.status === "done";
+  if (a.done) {
+    a.bucket = "done";
+    // Stamp only on the transition — re-syncing a board full of historic
+    // completions must not make them all look freshly done on the ribbon.
+    if (was !== "done" && !a.doneTs) a.doneTs = new Date().toISOString();
+  } else {
+    if (a.bucket === "done") delete a.bucket;
+    delete a.doneTs;
+  }
+  return a;
+}
+
+// Initials for the ownership circle: "Tom Blake" -> TB, "tom" -> T.
+const initialsOf = name => String(name || "").trim().split(/\s+/)
+  .map(w => w.charAt(0).toUpperCase()).join("").slice(0, 2) || "?";
+const personId = name => String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+
+// People are registered on first use so the desk can render a consistent
+// circle for each person without the board carrying a hand-maintained roster.
+function ensurePerson(ref, nameOrId) {
+  const raw = String(nameOrId || "").trim();
+  if (!raw) return null;
+  const id = personId(raw);
+  ref.people = asArray(ref.people);
+  let p = ref.people.find(x => x && (x.id === id || personId(x.name) === id));
+  if (!p) { p = { id, name: raw, initials: initialsOf(raw) }; ref.people.push(p); }
+  return p.id;
+}
+
 // Self-kept spend tally: every Anthropic response reports its own token usage;
 // accumulate it in /apiUsage so the desk app can show a live meter.
 function recordUsage(u) {
@@ -118,11 +190,11 @@ function recordUsage(u) {
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "115.0" });
+  const server = new McpServer({ name: "walk-reference", version: "116.0" });
 
   server.tool(
     "get_reference",
-    "Read the Morning Walk rolling reference: meta, fronts (status/liveEdge/detail), todaysPlan (tasks with done flags, Richard's timestamped notes, and Claude's claudeNote marks), ideas (first-class concepts, each with a state and a richard/claude discussion thread), richardsNotes, claudesTake. Call at the start of every morning-walk chat.",
+    "Read the Morning Walk rolling reference. v3 board: projects[] (the THINKING layer — a binder with a rolling ~75-word summary; no tick boxes, ever) each holding actions[] (the DOING layer — tasks with title/body, status open|part|done, bucket agenda|progress|waiting|done, updates[] progress log, owners {primary, secondary[]}, subtasks[], blockedBy[] dependency links); widgets[] (the PRESENTATION layer — own no data, they point at a task or project and render it a particular way); conversations[] (Q&A threads — a question stays 'open' until an answer is written into its thread); notes[] (the in tray), plan {date, actionIds}, people[], take, diffs, meta. Legacy v1 keys (fronts, todaysPlan, ideas, richardsNotes, claudesTake) may still be present as mirrors. Call at the start of every morning-walk chat.",
     {},
     async () => {
       const snap = await db.ref(NODE).get();
@@ -133,7 +205,7 @@ function buildServer() {
 
   server.tool(
     "update_reference",
-    "Write the complete new state of the rolling reference — use for the DAILY COMPILE (a full rewrite), NOT for small mid-day edits (use patch_reference for those). Pass the ENTIRE document as a JSON string — replaces the node wholesale; previous state is archived automatically and meta.lastUpdated/updatedBy are stamped by the server. v2 schema: notes[], projects[] (each with actions: id/text/urgency/done/provenance), plan {date, actionIds}, take, diffs[] — legacy mirror keys (fronts, todaysPlan) accepted during transition. Refused if notes, projects or plan are missing. OPTIONAL CONFLICT GUARD: pass expectedLastUpdated (the meta.lastUpdated value you saw when you read the board); if the live board has moved since, the write is refused so you can re-read rather than clobber a desk-app or scheduled edit.",
+    "Write the complete new state of the rolling reference — use for the DAILY COMPILE (a full rewrite), NOT for small mid-day edits (use patch_reference for those). Pass the ENTIRE document as a JSON string — replaces the node wholesale; previous state is archived automatically and meta.lastUpdated/updatedBy are stamped by the server. v3 schema: notes[], projects[] (each with actions: id/text/body/urgency/done/status/bucket/updates[]/owners{primary,secondary[]}/subtasks[]/blockedBy[]/provenance), plan {date, actionIds}, widgets[] (presentation only — lifespan permanent|invoked), conversations[] ({id, topic, state open|answered|closed, thread[{author,text,ts}]}), people[], take, diffs[] — legacy mirror keys (fronts, todaysPlan) accepted during transition. done is the source of truth (done === status==='done') and is re-synced server-side on write. Refused if notes, projects or plan are missing. OPTIONAL CONFLICT GUARD: pass expectedLastUpdated (the meta.lastUpdated value you saw when you read the board); if the live board has moved since, the write is refused so you can re-read rather than clobber a desk-app or scheduled edit.",
     {
       referenceJson: z.string().describe("Full reference document as a JSON string"),
       expectedLastUpdated: z.string().optional().describe("The meta.lastUpdated you read; write is refused if the live board has moved past it")
@@ -159,6 +231,12 @@ function buildServer() {
 
       if (current.exists()) await db.ref(HISTORY + "/" + Date.now()).set(current.val());
 
+      // v3: done is the source of truth. A full rewrite that sets one and not the
+      // other would let them drift, so re-sync every task before the write.
+      asArray(next.projects).forEach(p => asArray(p.actions).forEach(a => {
+        if (a && a.id) syncStatus(a, a.status);
+      }));
+
       next.meta = next.meta || {};
       next.meta.lastUpdated = new Date().toISOString();
       next.meta.updatedBy = "claude";
@@ -182,6 +260,23 @@ function buildServer() {
     "  { op:'appendNote', text:'...', state:'parked' }  — appendNote also accepts state:'parked' to file a live-trigger note that a file pass skips\n" +
     "  { op:'setNoteState', noteId:'n7', state:'parked' }  — move a note between open (file me) and parked (live trigger, skip me); cannot touch a resolved note\n" +
     "  { op:'setDirective', directive:'file' }  — set meta.directive, the single file-held instruction naming which mode the automation runs (file | tidy | off)\n" +
+    "v3 ops — the DOING layer (tasks):\n" +
+    "  { op:'setStatus', taskId:'a3', status:'part' }  — open | part | done. 'part' is the mid-state: not done, but legitimately in flight (carryable-not-ignored). done stays the source of truth and is synced for you.\n" +
+    "  { op:'appendActionUpdate', taskId:'a3', text:'...' }  — append a progress note to the task's update log WITHOUT ticking it (server stamps ts). This is 'send an update on this item'.\n" +
+    "  { op:'setBucket', taskId:'a3', bucket:'waiting' }  — refile across the columns: agenda (on the agenda) | progress (in progress, MINE — signal: act) | waiting (blocked on someone else — signal: chase) | done. Setting 'done' also sets status done.\n" +
+    "  { op:'setTaskBody', taskId:'a3', body:'...' }  — set the task's body/content (a task is a title AND a body, not just a one-liner)\n" +
+    "  { op:'setOwner', taskId:'a3', subtaskId:'s1', primary:'Tom', secondary:['Richard'] }  — ownership is LAYERED: one primary owner (the person actually doing it) plus any number of secondary associates. subtaskId optional — a person can own a specific subtask inside a task someone else owns. Pass clear:true to strip ownership. A primary owner who isn't Richard reads as a chase, not a do.\n" +
+    "  { op:'addSubtask', taskId:'a3', text:'...', primary:'Tom' }  — add a subtask (server assigns the id); primary optional\n" +
+    "  { op:'tickSubtask', taskId:'a3', subtaskId:'s1', done:true }  — tick a subtask\n" +
+    "  { op:'setBlockedBy', taskId:'a61', blockedBy:['a60'] }  — dependency link: this task can't start until those are done. Not a Gantt — dependency-aware ordering. A task blocked by an unfinished predecessor reads as Waiting until the predecessor is done. Pass [] to clear.\n" +
+    "  { op:'addPerson', name:'Tom Blake', initials:'TB' }  — register a person (done automatically on first setOwner, so rarely needed)\n" +
+    "Q&A — a question is NEVER silently resolved:\n" +
+    "  { op:'askQuestion', topic:'...', text:'...' }  — open a conversation. It stays 'open' and shows prominently until an answer is written into its thread.\n" +
+    "  { op:'answerQuestion', convId:'c1', text:'...' }  — write the reply into the thread and set state 'answered'. Use this from a chat or an on-demand answer pass — never leave a question resolved without a written answer.\n" +
+    "  { op:'setConversationState', convId:'c1', state:'closed' }  — open | answered | closed\n" +
+    "Widgets — presentation only, they own no data (Claude curates them; Richard narrates):\n" +
+    "  { op:'addWidget', type:'countdown', props:{...}, anchor:'top', lifespan:'invoked', expiry:'2026-08-18' }  — spin one up. lifespan: 'permanent' (standing — always on the shelf) or 'invoked' (has a trigger and an expiry; retire it when it goes stale).\n" +
+    "  { op:'retireWidget', widgetId:'w12' }  — take one off the shelf. Safe: widgets own no data.\n" +
     "Notes are append-only; there is no op that deletes or rewrites an existing note's text. Returns the new meta.lastUpdated.",
     {
       ops: z.string().describe("JSON array of operation objects, applied in order (see tool description for shapes)"),
@@ -214,6 +309,39 @@ function buildServer() {
         return "n" + n;
       };
       const findProject = id => asArray(ref.projects).find(p => p.id === id) || null;
+      const nextConvId = () => {
+        const ids = asArray(ref.conversations).map(c => String(c.id));
+        let n = ids.length + 1;
+        while (ids.includes("c" + n)) n++;
+        return "c" + n;
+      };
+      const nextWidgetId = () => {
+        let max = 0;
+        asArray(ref.widgets).forEach(w => {
+          const m = /^w(\d+)$/.exec(String(w?.id || ""));
+          if (m) max = Math.max(max, parseInt(m[1], 10));
+        });
+        return "w" + (max + 1);
+      };
+      const nextSubId = a => {
+        const ids = asArray(a.subtasks).map(s => String(s.id));
+        let n = ids.length + 1;
+        while (ids.includes("s" + n)) n++;
+        return "s" + n;
+      };
+      // Ownership is layered: one primary (the doer), any number of secondaries.
+      const applyOwners = (target, o) => {
+        if (o.clear) { delete target.owners; return "cleared"; }
+        const owners = target.owners || {};
+        if (o.primary !== undefined)
+          owners.primary = o.primary === null || o.primary === "" ? null : ensurePerson(ref, o.primary);
+        if (Array.isArray(o.secondary))
+          owners.secondary = o.secondary.map(s => ensurePerson(ref, s)).filter(Boolean);
+        if (!owners.primary) delete owners.primary;
+        if (!asArray(owners.secondary).length) delete owners.secondary;
+        if (Object.keys(owners).length) target.owners = owners; else delete target.owners;
+        return (owners.primary || "—") + (asArray(owners.secondary).length ? "+" + owners.secondary.length : "");
+      };
       const nextActionId = () => {
         // Highest existing aN across ALL projects + 1, so ids never collide even
         // if a project was deleted or actions were moved between projects.
@@ -236,7 +364,8 @@ function buildServer() {
             case "tickAction": {
               const a = findAction(o.actionId);
               if (!a) { errors.push("op " + i + ": action " + o.actionId + " not found"); break; }
-              a.done = o.done !== false;
+              // v116: a tick moves status and bucket with it, so the three can never drift.
+              syncStatus(a, o.done !== false ? "done" : "open");
               applied.push("tick " + o.actionId + "=" + a.done);
               break;
             }
@@ -305,6 +434,18 @@ function buildServer() {
                 id, text: String(o.text), urgency, done: false,
                 provenance: (Array.isArray(o.provenance) ? o.provenance.map(String) : [])
               };
+              // v3 fields, all optional — a task is a title AND a body, carries a
+              // status, sits in a bucket, and may be owned or blocked from birth.
+              if (o.body) action.body = String(o.body);
+              if (Array.isArray(o.blockedBy)) action.blockedBy = o.blockedBy.map(String);
+              if (o.primary !== undefined || Array.isArray(o.secondary)) applyOwners(action, o);
+              if (Array.isArray(o.subtasks)) action.subtasks = o.subtasks.map((s, si) => {
+                const st = { id: "s" + (si + 1), text: String(typeof s === "string" ? s : s.text), done: false };
+                if (typeof s === "object" && s && s.primary) applyOwners(st, { primary: s.primary });
+                return st;
+              });
+              syncStatus(action, o.status);
+              if (BUCKETS.includes(o.bucket)) { action.bucket = o.bucket; if (o.bucket === "done") syncStatus(action, "done"); }
               proj.actions = asArray(proj.actions);
               proj.actions.push(action);
               // Optionally drop onto today's plan (end of the list).
@@ -348,6 +489,183 @@ function buildServer() {
               applied.push("directive=" + ref.meta.directive);
               break;
             }
+
+            /* ---------------- v3: the doing layer ---------------- */
+            case "setStatus": {
+              // The mid-state fix (a55): binary done/not-done had nowhere to record
+              // progress that isn't completion. 'part' is not done, but in flight.
+              if (!STATUSES.includes(o.status)) { errors.push("op " + i + ": status must be open|part|done"); break; }
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              syncStatus(a, o.status);
+              applied.push("status " + a.id + "=" + a.status);
+              break;
+            }
+            case "appendActionUpdate": {
+              // Attach a progress note WITHOUT a tick. Append-only.
+              if (!o.text) { errors.push("op " + i + ": appendActionUpdate needs text"); break; }
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              a.updates = asArray(a.updates);
+              a.updates.push({ text: String(o.text), ts: now });
+              applied.push("update+ " + a.id + " (" + a.updates.length + ")");
+              break;
+            }
+            case "setBucket": {
+              if (!BUCKETS.includes(o.bucket)) { errors.push("op " + i + ": bucket must be agenda|progress|waiting|done"); break; }
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              if (o.bucket === "done") syncStatus(a, "done");
+              else { if (taskStatus(a) === "done") syncStatus(a, "open"); a.bucket = o.bucket; }
+              // The chase radar counts days — the clock starts when the wait does.
+              if (a.bucket === "waiting") { if (!a.waitingSince) a.waitingSince = now; }
+              else delete a.waitingSince;
+              applied.push("bucket " + a.id + "=" + (a.bucket || "done"));
+              break;
+            }
+            case "setTaskBody": {
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              if (o.body) a.body = String(o.body); else delete a.body;
+              applied.push("body " + a.id);
+              break;
+            }
+            case "setOwner": {
+              // Ownership is a property of the DOING layer only — tasks and
+              // subtasks. Projects are binders; they are not owned this way.
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              let target = a, label = a.id;
+              if (o.subtaskId) {
+                const st = asArray(a.subtasks).find(s => s.id === o.subtaskId);
+                if (!st) { errors.push("op " + i + ": subtask " + o.subtaskId + " not found on " + a.id); break; }
+                target = st; label = a.id + "/" + st.id;
+              }
+              applied.push("owner " + label + "=" + applyOwners(target, o));
+              // Handing a task to someone else starts the chase clock too —
+              // "owned by someone else" and "waiting on someone else" are cousins.
+              if (!o.subtaskId) {
+                const me = String(ref.meta?.me || "richard");
+                const p = a.owners?.primary;
+                if (p && p !== me) { if (!a.waitingSince) a.waitingSince = now; }
+                else delete a.waitingSince;
+              }
+              break;
+            }
+            case "addSubtask": {
+              if (!o.text) { errors.push("op " + i + ": addSubtask needs text"); break; }
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              a.subtasks = asArray(a.subtasks);
+              const st = { id: nextSubId(a), text: String(o.text), done: false };
+              if (o.primary || Array.isArray(o.secondary)) applyOwners(st, o);
+              a.subtasks.push(st);
+              applied.push("subtask+ " + a.id + "/" + st.id);
+              break;
+            }
+            case "tickSubtask": {
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              const st = asArray(a.subtasks).find(s => s.id === o.subtaskId);
+              if (!st) { errors.push("op " + i + ": subtask " + o.subtaskId + " not found on " + a.id); break; }
+              st.done = o.done !== false;
+              applied.push("subtask " + a.id + "/" + st.id + "=" + st.done);
+              break;
+            }
+            case "setBlockedBy": {
+              // Dependency-aware ordering, not a Gantt: the desk reads a task with
+              // an unfinished predecessor as Waiting, and surfaces what's unblocked.
+              if (!Array.isArray(o.blockedBy)) { errors.push("op " + i + ": setBlockedBy needs blockedBy array"); break; }
+              const a = findAction(o.taskId || o.actionId);
+              if (!a) { errors.push("op " + i + ": task " + (o.taskId || o.actionId) + " not found"); break; }
+              const ids = o.blockedBy.map(String).filter(x => x !== a.id);
+              const missing = ids.filter(x => !findAction(x));
+              if (missing.length) { errors.push("op " + i + ": unknown predecessor(s) " + missing.join(",")); break; }
+              if (ids.length) a.blockedBy = ids; else delete a.blockedBy;
+              applied.push("blockedBy " + a.id + "=[" + ids.join(",") + "]");
+              break;
+            }
+            case "addPerson": {
+              if (!o.name) { errors.push("op " + i + ": addPerson needs name"); break; }
+              const pid = ensurePerson(ref, o.name);
+              if (o.initials) {
+                const p = asArray(ref.people).find(x => x.id === pid);
+                if (p) p.initials = String(o.initials).slice(0, 3).toUpperCase();
+              }
+              applied.push("person+ " + pid);
+              break;
+            }
+
+            /* ---------------- v3: conversations (Q&A) ---------------- */
+            case "askQuestion": {
+              // The a56 fix: a question dropped in the tray used to be filed-and-
+              // resolved silently, so the answer was invisible. A conversation
+              // stays 'open' until an answer is written into its thread.
+              if (!o.text) { errors.push("op " + i + ": askQuestion needs text"); break; }
+              ref.conversations = asArray(ref.conversations);
+              const conv = {
+                id: nextConvId(), topic: String(o.topic || String(o.text).slice(0, 60)),
+                state: "open", opened: now,
+                thread: [{ author: o.author === "claude" ? "claude" : "richard", text: String(o.text), ts: now }]
+              };
+              ref.conversations.push(conv);
+              applied.push("question+ " + conv.id);
+              break;
+            }
+            case "answerQuestion": {
+              if (!o.convId || !o.text) { errors.push("op " + i + ": answerQuestion needs convId+text"); break; }
+              const conv = asArray(ref.conversations).find(c => c.id === o.convId);
+              if (!conv) { errors.push("op " + i + ": conversation " + o.convId + " not found"); break; }
+              conv.thread = asArray(conv.thread);
+              conv.thread.push({ author: o.author === "richard" ? "richard" : "claude", text: String(o.text), ts: now });
+              conv.state = "answered";
+              applied.push("answer " + conv.id);
+              break;
+            }
+            case "setConversationState": {
+              if (!o.convId || !["open", "answered", "closed"].includes(o.state)) {
+                errors.push("op " + i + ": setConversationState needs convId + state(open|answered|closed)"); break;
+              }
+              const conv = asArray(ref.conversations).find(c => c.id === o.convId);
+              if (!conv) { errors.push("op " + i + ": conversation " + o.convId + " not found"); break; }
+              // Guard the whole point of the feature: nothing gets marked answered
+              // without an answer actually sitting in the thread.
+              if (o.state === "answered" && !asArray(conv.thread).some(t => t.author === "claude")) {
+                errors.push("op " + i + ": " + conv.id + " has no answer in its thread — use answerQuestion"); break;
+              }
+              conv.state = o.state;
+              applied.push("conv " + conv.id + "=" + o.state);
+              break;
+            }
+
+            /* ---------------- v3: widgets (presentation only) ---------------- */
+            case "addWidget": {
+              if (!o.type) { errors.push("op " + i + ": addWidget needs type"); break; }
+              ref.widgets = asArray(ref.widgets);
+              const w = {
+                id: o.id ? String(o.id) : nextWidgetId(),
+                type: String(o.type),
+                anchor: o.anchor ? String(o.anchor) : "top",
+                lifespan: o.lifespan === "invoked" ? "invoked" : "permanent",
+                props: (o.props && typeof o.props === "object") ? o.props : {}
+              };
+              if (o.expiry) w.expiry = String(o.expiry);
+              if (Array.isArray(o.provenance)) w.provenance = o.provenance.map(String);
+              ref.widgets.push(w);
+              applied.push("widget+ " + w.id + " (" + w.type + ", " + w.lifespan + ")");
+              break;
+            }
+            case "retireWidget": {
+              // Safe to delete outright: widgets own no data, they only point at it.
+              if (!o.widgetId) { errors.push("op " + i + ": retireWidget needs widgetId"); break; }
+              const ws = asArray(ref.widgets);
+              const before = ws.length;
+              ref.widgets = ws.filter(w => String(w?.id) !== String(o.widgetId));
+              if (ref.widgets.length === before) { errors.push("op " + i + ": widget " + o.widgetId + " not found"); break; }
+              applied.push("widget- " + o.widgetId);
+              break;
+            }
+
             default:
               errors.push("op " + i + ": unknown op '" + o.op + "'");
           }
@@ -524,13 +842,24 @@ async function runReview() {
 
 /* ------------------------- v2 (Director/Author) ------------------------ */
 
+// v116: the tick map alone missed the mid-states. A task moving open -> part, or
+// being refiled from In progress to Waiting, is a real change and must wake a
+// review the way a tick does. The desk mirrors this exactly (clientSignature).
+function v3Maps(ref) {
+  const done = {}, status = {}, bucket = {};
+  asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
+    done[a.id] = !!a.done;
+    status[a.id] = taskStatus(a);
+    bucket[a.id] = a.bucket || "";
+  }));
+  return { done, status, bucket };
+}
 function v2Signature(ref) {
   const notes = asArray(ref.notes).filter(n => n.state === "open")
     .map(n => ({ id: n.id, text: n.text }));
-  const done = {};
-  asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => { done[a.id] = !!a.done; }));
+  const { done, status, bucket } = v3Maps(ref);
   return crypto.createHash("sha256")
-    .update(JSON.stringify({ notes, done, date: ref.plan?.date || "" })).digest("hex");
+    .update(JSON.stringify({ notes, done, status, bucket, date: ref.plan?.date || "" })).digest("hex");
 }
 
 const REVIEW_V2_SYSTEM = `You are the mid-day reviewer of Richard's v2 Walk Reference (Director/Author board). This is judgement, not compile: actions and resolutions only — no restructuring, no new projects or actions, no summary rewrites. Richard is Digital & Broadcast Manager at The National League.
@@ -539,6 +868,8 @@ Return ONLY a JSON object, no fences:
 {
   "take": "2-4 sentence verdict on the day's shape right now",
   "tickActionIds": ["a3"],
+  "partActionIds": ["a5"],
+  "actionUpdates": { "a5": "progress note, one line" },
   "noteResolutions": { "n7": "answered — one line" },
   "diffWhat": "one line describing any changes made, or null"
 }
@@ -546,7 +877,10 @@ Return ONLY a JSON object, no fences:
 Rules:
 - take: teeth, earned. Hard dates and unrecoverable items outrank everything. If nothing has changed, say so in one line — a clean bill is a valid verdict.
 - tickActionIds: ONLY actions the board itself evidences as complete. No fabricated completions — if the state doesn't show it, it didn't happen.
+- partActionIds: tasks the board evidences as genuinely in flight but NOT finished (status 'part'). Treat 'part' as carryable-not-ignored — surface the latest update rather than reading the item as untouched.
+- actionUpdates: a progress note attached to a task WITHOUT ticking it, when the board shows movement short of completion. One line each, evidenced.
 - noteResolutions: ONLY for open notes you can genuinely answer or action from the board. One line each (answered / actioned / pushed back — with why). Leave notes you cannot resolve untouched — compile will take them.
+- Do NOT touch conversations[]. An open question is answered by a chat or the on-demand answer pass, never here — a question is never silently resolved.
 - Never edit Richard's words. Judge the work, never the people; do not extend assessments of named colleagues.
 - Weekend/evening: judge accordingly; do not manufacture office-hours urgency.`;
 
@@ -587,9 +921,29 @@ async function runReviewV2(ref) {
 
   asArray(v.tickActionIds).forEach(id => {
     asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
-      if (a.id === id && !a.done) { a.done = true; changed++; }
+      if (a.id === id && !a.done) { syncStatus(a, "done"); changed++; }
     }));
   });
+  // Mid-states: a task the board evidences as in-flight but not finished.
+  if (v.partActionIds) asArray(v.partActionIds).forEach(id => {
+    asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
+      if (a.id === id && taskStatus(a) === "open") { syncStatus(a, "part"); changed++; }
+    }));
+  });
+  // Progress logged without a tick — the op whose absence forced logging
+  // progress as brand-new actions.
+  if (v.actionUpdates && typeof v.actionUpdates === "object") {
+    Object.keys(v.actionUpdates).forEach(id => {
+      asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
+        if (a.id !== id) return;
+        a.updates = asArray(a.updates);
+        const text = String(v.actionUpdates[id]);
+        if (a.updates.some(u => u.text === text)) return;     // never log the same update twice
+        a.updates.push({ text, ts: now });
+        changed++;
+      }));
+    });
+  }
   if (v.noteResolutions && typeof v.noteResolutions === "object") {
     asArray(ref.notes).forEach(n => {
       const r = v.noteResolutions[n.id];
@@ -611,17 +965,95 @@ async function runReviewV2(ref) {
 
   await db.ref(NODE).set(ref);
 
-  const basisDone = {};
-  asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => { basisDone[a.id] = !!a.done; }));
+  const maps = v3Maps(ref);
   const basisNotes = {};
   asArray(ref.notes).filter(n => n.state === "open").forEach(n => {
     basisNotes[n.id] = crypto.createHash("sha256").update(String(n.text || "")).digest("hex");
   });
   await db.ref(REVIEW_STATE).set({ sig: v2Signature(ref), ts: now,
-    basis: { done: basisDone, notes: basisNotes, date: ref.plan?.date || "" } });
+    basis: { done: maps.done, status: maps.status, bucket: maps.bucket,
+             notes: basisNotes, date: ref.plan?.date || "" } });
 
   return { status: 200, body: "Marked at " + now + " (" + changed + " change(s)" +
     (v.take ? ", take replaced" : "") + ")." };
+}
+
+/* ==================== Open questions — on-demand pass ====================
+   Section 8 of the v3 spec: a question is NEVER silently resolved. It stays
+   open and shows prominently until an answer is written into its thread.
+   Answers come from a chat or from THIS pass — deliberately not from the
+   silent hourly file pass, which has no channel to reply. */
+
+const ANSWER_SYSTEM = `You are answering the open questions on Richard's Walk Reference board. Richard is Digital & Broadcast Manager at The National League (English football's fifth tier).
+
+You receive the live board and the list of open conversations. Answer each one you can actually answer from the board and your own judgement.
+
+Return ONLY a JSON object, no fences:
+{ "answers": { "<convId>": "<the answer, 1-6 sentences>" } }
+
+Rules:
+- Answer the question that was asked. No summarising it back, no restating the board.
+- Where the answer is a workflow or a rule, state the rule plainly and say why it is the rule.
+- If you genuinely cannot answer one from the board, OMIT it — leaving it open is correct and honest. Never write a non-answer to clear the badge; an unanswered question that stays open is the feature, not the failure.
+- Fabricate nothing. If the answer depends on a fact the board does not hold, say exactly which fact you need.
+- British English. Concise, direct, no filler. Judge the work, never the people.`;
+
+async function runAnswerPass() {
+  if (!ANTHROPIC_KEY) return { status: 500, body: "ANTHROPIC_API_KEY not set on the service." };
+  const snap = await db.ref(NODE).get();
+  if (!snap.exists()) return { status: 404, body: "walkReference is empty." };
+  const ref = snap.val();
+
+  const open = asArray(ref.conversations).filter(c => c && c.state === "open");
+  if (!open.length) return { status: 200, body: "No open questions — nothing to answer." };
+
+  const ctx = { ...ref };
+  delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
+  delete ctx.ideas; delete ctx.claudesTake; delete ctx.diffs;
+
+  const resp = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000,
+      system: ANSWER_SYSTEM,
+      messages: [{ role: "user", content:
+        "Current time: " + new Date().toISOString() + " (UK)\n\n" +
+        "Open questions:\n" + JSON.stringify(open.map(c => ({ id: c.id, topic: c.topic, thread: c.thread }))) +
+        "\n\nBoard:\n" + JSON.stringify(ctx) }] })
+  });
+  if (!resp.ok) {
+    console.error("Anthropic API error:", resp.status, await resp.text());
+    return { status: 502, body: "Anthropic API error " + resp.status };
+  }
+  const data = await resp.json();
+  recordUsage(data.usage);
+  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
+  let v;
+  try { v = JSON.parse(text.replace(/```json|```/g, "").trim()); }
+  catch { return { status: 502, body: "Answer output was not valid JSON — nothing written." }; }
+
+  const now = new Date().toISOString();
+  await db.ref(HISTORY + "/" + Date.now()).set(ref);
+
+  let answered = 0;
+  const convs = asArray(ref.conversations);
+  Object.keys(v.answers || {}).forEach(cid => {
+    const c = convs.find(x => x.id === cid);
+    if (!c || c.state !== "open") return;
+    const body = String(v.answers[cid] || "").trim();
+    if (!body) return;                                  // no answer written = stays open
+    c.thread = asArray(c.thread);
+    c.thread.push({ author: "claude", text: body, ts: now });
+    c.state = "answered";
+    answered++;
+  });
+  if (!answered) return { status: 200, body: "Nothing answerable from the board — " + open.length + " question(s) left open." };
+
+  ref.conversations = convs;
+  ref.meta = ref.meta || {};
+  ref.meta.lastReviewed = now;
+  await db.ref(NODE).set(ref);
+  return { status: 200, body: "Answered " + answered + " of " + open.length + " open question(s) at " + now + "." };
 }
 
 /* ============================ Assist tools ============================ */
@@ -723,6 +1155,17 @@ const reviewHandler = async (_req, res) => {
 app.options(REVIEW_PATH, (_req, res) => { cors(res); res.status(204).end(); });
 app.post(REVIEW_PATH, reviewHandler);
 app.get(REVIEW_PATH, reviewHandler);
+
+// On-demand "answer open questions" pass — driven by the desk's Q&A panel.
+const ANSWER_PATH = "/answer/" + REVIEW_SECRET;
+const answerHandler = async (_req, res) => {
+  cors(res);
+  try { const r = await runAnswerPass(); res.status(r.status).send(r.body); }
+  catch (e) { console.error(e); res.status(500).send("answer pass failed: " + e.message); }
+};
+app.options(ANSWER_PATH, (_req, res) => { cors(res); res.status(204).end(); });
+app.post(ANSWER_PATH, answerHandler);
+app.get(ANSWER_PATH, answerHandler);
 
 const assistCors = res => {
   res.set("Access-Control-Allow-Origin", "https://rckdo.github.io");
