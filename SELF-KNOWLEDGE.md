@@ -101,6 +101,8 @@ Presented with no caveat, as "the complete fetch solution".
 
 Eight questions. Eight about the tool's own construction. Zero about Richard's actual work.
 
+Note the shape of Thread 4 in particular — *"can't it run from Max 20x?"* — asked about a scheduled pass that, as §4.5 records, was never running at all. Richard was asking how to pay less for something that was never happening, and was told, wrongly, that it was already free.
+
 Of the eight answers: **six materially wrong**, **one self-contradicting a previous answer**, **one shipping code that cannot run**. All eight marked `answered`, badge cleared.
 
 The single question type the system was structurally incapable of answering is the only question type it was ever asked.
@@ -143,6 +145,16 @@ So the system's one honesty feature protected against **silence** and not at all
 The Tools header carries a live spend meter subscribed to `/apiUsage` (`index.html:1226`, `renderSpend` at `:2818`). While the Q&A panel was telling Richard there was no API spend, the panel above it was displaying the API spend, accruing, in real time.
 
 Neither component knew the other existed. No part of the system was responsible for the tool's account of itself.
+
+### 4.5 The countdown counted down to nothing
+
+Found 06/08, while removing the plumbing. The desk displayed **"Next auto-mark in MM:SS"**, ticking every second toward the top of the hour (`RUN_MINUTE = 36`). Its cost estimate offered the alternative: *"or wait for the free run."*
+
+**There was no run.** The Cloud Scheduler API was never enabled on the project, so the job that `/review` was built for (server v65) was never created and never fired once. Every paid call this tool ever made was one Richard triggered by hand.
+
+This is the same defect as §4.4 and arguably the purest example of it. The countdown was not reading a schedule — it was computing a time from a hardcoded constant that mirrored a schedule someone intended to create. Nothing checked. Nothing could have noticed. It would have counted down convincingly forever.
+
+The consequence is a corrected diagnosis of the old tool. The complaint was "it goes stale until a timer fires." The truth is that there was no timer, and the interface implied there was — so waiting was never going to produce anything, and every hour spent waiting was spent on a promise the desk had invented. That is worse than a slow tool, and it is why the rebuild deletes waiting rather than shortening it.
 
 ---
 

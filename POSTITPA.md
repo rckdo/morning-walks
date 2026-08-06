@@ -64,7 +64,9 @@ The test for any new desk feature: *does this need to think?* If yes, it belongs
 
 ### 2.3 Why this kills the timer
 
-The old failure was structural: the page could capture, but only a twice-daily server sweep could think. Post-its sat unread; confirmation arrived hours late or not at all; trust broke.
+The old failure was structural: the page could capture, but only a server sweep could think. Post-its sat unread; confirmation arrived late or not at all; trust broke.
+
+**And the sweep was never running.** Confirmed 06/08 — Cloud Scheduler was never enabled, so nothing ever fired `/review` on a schedule. The desk counted down to it anyway, every hour, to a run that did not exist. So the honest diagnosis of the old tool is not "the timer was too slow" but "there was no timer, and the desk implied there was." Waiting was never going to work.
 
 Here there is no sweep, because filing happens **in the same conversational turn as the scribble.** Richard says "done the directory", Claude patches the board, the red pen appears on the desk within seconds. Not a faster timer — no timer.
 
@@ -73,7 +75,9 @@ Here there is no sweep, because filing happens **in the same conversational turn
 ## 3. Governing principles
 
 ### 3.1 Everything on the subscription
-Zero paid API calls. Enforced by construction: nothing in the system except a Claude client is capable of inference. Delete `ANTHROPIC_API_KEY` and every code path that reads it.
+Zero paid API calls. Enforced by construction: nothing in the system except a Claude client is capable of inference.
+
+**Done, 06/08/2026.** Every code path that read `ANTHROPIC_API_KEY` is deleted (server v117) and the key itself is revoked. This principle is now a fact about the system rather than an instruction to the build — there is no paid path left to take, and restoring one would mean writing new code and issuing a new key.
 
 ### 3.2 Radical simplicity — the ponytail ladder
 Before adding anything, walk the ladder and stop at the first rung that works: *Does this need to exist? → Already in the codebase? → Stdlib? → Native platform? → An existing dependency? → Can it be one line? → Only then, the minimum.*
@@ -199,7 +203,7 @@ Everything below exists today and does not survive the rebuild.
 - `/answer` — the Q&A pass (`runAnswerPass`)
 - `/assist` — the email composer (`runAssist`, `compose_email`)
 - `ANTHROPIC_API_KEY`, `REVIEW_SECRET`, the `/apiUsage` spend tally and its desk meter
-- The Cloud Scheduler job that drives `/review`
+- ~~The Cloud Scheduler job that drives `/review`~~ — **there wasn't one.** Confirmed 06/08: the Cloud Scheduler API was never enabled on the project, so no job was ever created and the hourly pass never fired once. Every paid call this tool ever made was one Richard triggered by hand.
 
 **Interface:** the current desk in full. Nothing in its structure or feature set is design precedent. All National League branding.
 

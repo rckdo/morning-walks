@@ -2,6 +2,10 @@
 
 Operational reference for the Morning Walk planner (desk app + walk-mcp server + Walk Reference MCP connector). Read this when a session misbehaves before re-diagnosing from scratch. Last updated 05/08/2026 (server v116 / desk v118 — the v3 board architecture).
 
+> **Partly superseded, 06/08/2026 (server v117).** The server no longer thinks: `/review`, `/answer` and `/assist` are deleted, along with `ANTHROPIC_API_KEY` and the spend meter. Judgement now happens in a Claude client on the subscription. Everything here about the **board** — the patch ops, the RTDB paths, the rules, the write-diagnosis order in §1 — is still accurate and still the place to look. Anything about scheduled or server-side passes is history. See `POSTITPA.md` for the architecture and `SELF-KNOWLEDGE.md` for why.
+>
+> Also corrected 06/08: this file described `/review` as "scheduled". **It never was.** Cloud Scheduler was never enabled on the project, so no job existed and the hourly pass never ran. The desk's countdown was computing a time from a hardcoded constant, not reading a schedule.
+
 ---
 
 ## 1. Writes from chat don't land — diagnosis order
@@ -166,7 +170,7 @@ Archive keys are timestamps nudged forward on collision, so two writes in the sa
 - **Firebase RTDB node:** `walkReference`. Full snapshots archive under `walkReferenceHistory` (capped at 20), patch deltas under `walkReferenceOps` (capped at 200), each with a small `…Index` sibling used for pruning. Rules live in `database.rules.json` at the repo root — see §3b; a Firebase data export never contains them.
 - **Server deploys via Cloud Run** using Application Default Credentials — no key file needed when deployed inside the project.
 - **After editing `walk-mcp/server.js`:** commit → Cloud Run redeploys. Rules/app changes are separate.
-- **Endpoints on the service:** `/mcp/<SECRET>` (MCP tools), `/review/<REVIEW_SECRET>` (scheduled + "mark now" judgement), `/answer/<REVIEW_SECRET>` (on-demand open-question answers, v116+), `/assist/<REVIEW_SECRET>` (Firebase-authenticated tools, e.g. the email composer).
+- **Endpoints on the service (v117):** `/mcp/<SECRET>` — the MCP tools, and the only endpoint left. `/review`, `/answer` and `/assist` are deleted and now 404. There is no API key on the service and no model call in `server.js`.
 - **RTDB paths the desk writes directly:** `walkReference/projects/<i>/actions/<j>` (status, bucket, updates, owners, subtasks, waitingSince), `walkReference/notes`, `walkReference/conversations`, `walkReference/people`, `walkReference/widgets/<i>/props/...`, `walkReference/meta`. If a write returns `permission_denied`, check the rules cover the path — `conversations` and `people` are new in v118.
 
 ---
