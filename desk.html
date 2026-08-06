@@ -1,0 +1,562 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Your Desk</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#F3F5F7">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Kalam:wght@400;700&family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════
+   DESIGN CANON — fixed once, here. No per-element style decisions.
+
+   Tokens are carried forward from the old desk: the house style is
+   paper, ink and red pen, and that was already right.
+
+   Four text sizes, ratio ~1.3 apart. One button. One collapse.
+   ══════════════════════════════════════════════════════════════════ */
+:root{
+  /* surfaces and ink */
+  --paper:#F3F5F7; --ink:#21252B; --faint:#5C6470; --hairline:#D6DBE0;
+  --white:#FFFFFF; --redpen:#BE342C; --biro:#1D3A6B; --amber:#A8620D;
+  /* the post-its: yellow is Richard, green is the PA asking */
+  --stickyY:#FBF3B9; --stickyYd:#F3E9A0;
+  --stickyG:#DCEAC4; --stickyGd:#CCE0AE;
+  /* four sizes, nothing between them */
+  --t-meta:0.78rem; --t-body:1rem; --t-head:1.3rem; --t-display:1.75rem;
+  /* one shadow at two depths: resting, and lifted in the hand */
+  --lift-rest:0 2px 5px rgba(33,37,43,0.16);
+  --lift-hand:0 14px 30px rgba(33,37,43,0.26);
+  /* interface motion eases out; only paper gets a spring */
+  --ease:cubic-bezier(0.22,1,0.36,1);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{font-size:16px}
+body{
+  background:var(--paper); color:var(--ink);
+  font-family:'IBM Plex Sans',system-ui,sans-serif;
+  font-size:var(--t-body); line-height:1.6;
+  min-height:100dvh; -webkit-tap-highlight-color:transparent;
+  overflow-x:hidden;
+}
+.wrap{max-width:1000px;margin:0 auto;padding:0 20px 140px}
+
+/* ── header ─────────────────────────────────────────────────── */
+header{
+  display:flex;align-items:baseline;justify-content:space-between;
+  gap:16px;flex-wrap:wrap;padding:26px 0 16px;
+  border-bottom:1px solid var(--ink);
+}
+h1{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:var(--t-display);letter-spacing:-0.01em}
+.stamp{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--t-meta);color:var(--faint)}
+
+/* ── section headings ───────────────────────────────────────── */
+h2{
+  font-family:'Fraunces',Georgia,serif;font-weight:500;
+  font-size:var(--t-head);margin:38px 0 4px;
+}
+.sub{font-size:var(--t-meta);color:var(--faint);margin-bottom:16px}
+
+/* ── the desk surface ───────────────────────────────────────── */
+#desk{
+  position:relative;min-height:190px;
+  display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;
+  padding:6px 0 10px;
+}
+
+/* ── a post-it ──────────────────────────────────────────────────
+   Paper, not a card: 2px corners, a shadow, and a degree of tilt so
+   no two sit square. The curl is a pseudo-element lifting one corner
+   off the desk. Nothing here is a rounded UI card with an accent
+   stripe, which is what this would have been by reflex. */
+.postit{
+  position:relative;
+  width:206px;min-height:196px;
+  padding:16px 16px 30px;
+  background:var(--stickyY);
+  border-radius:2px;
+  box-shadow:var(--lift-rest);
+  font-family:'Caveat',cursive;font-weight:500;
+  font-size:1.28rem;line-height:1.42;
+  color:var(--biro);
+  cursor:grab;touch-action:none;
+  transition:box-shadow .18s var(--ease);
+  will-change:transform;
+}
+.postit:active{cursor:grabbing}
+.postit.lifted{box-shadow:var(--lift-hand);z-index:60}
+/* the curl: a soft fold at the bottom-right, sitting under the paper */
+.postit::after{
+  content:"";position:absolute;right:0;bottom:0;width:26px;height:26px;
+  background:linear-gradient(135deg,transparent 46%,rgba(33,37,43,0.10) 50%,transparent 54%);
+  border-bottom-right-radius:2px;pointer-events:none;
+}
+.postit .txt{display:block;white-space:pre-wrap;overflow-wrap:anywhere}
+.postit .meta{
+  position:absolute;left:16px;bottom:9px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:0.7rem;color:rgba(33,37,43,0.66);letter-spacing:0;
+}
+.postit .anchor{
+  display:inline-block;margin-bottom:6px;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:0.7rem;color:rgba(33,37,43,0.68);
+}
+
+/* green — the PA holding the pen, asking */
+.postit.ask{background:var(--stickyG)}
+.postit.ask .lab{
+  display:block;font-family:'IBM Plex Sans',sans-serif;font-weight:600;
+  font-size:0.7rem;letter-spacing:0.07em;text-transform:uppercase;
+  color:#3F6B3F;margin-bottom:7px;
+}
+
+/* red pen — the PA's record of what it did, written over the note */
+.postit.done .txt{opacity:0.5}
+.redpen{
+  display:block;margin-top:11px;
+  font-family:'Caveat',cursive;font-weight:600;font-size:1.2rem;line-height:1.3;
+  color:var(--redpen);
+  transform:rotate(-1.4deg);transform-origin:left center;
+}
+
+/* ── shelf and bin ──────────────────────────────────────────── */
+.shelf{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
+.shelf .postit{width:186px;min-height:0;font-size:1.12rem}
+.binned{opacity:0.62}
+details>summary{
+  cursor:pointer;list-style:none;
+  font-family:'Fraunces',Georgia,serif;font-size:var(--t-head);font-weight:500;
+  margin:38px 0 4px;
+}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸ ";color:var(--faint);font-size:0.8em}
+details[open]>summary::before{content:"▾ "}
+
+.empty{
+  font-family:'Kalam',cursive;font-size:1.1rem;color:var(--faint);
+  padding:26px 2px;
+}
+
+/* ── one button style ───────────────────────────────────────── */
+.btn{
+  font-family:'IBM Plex Sans',sans-serif;font-size:var(--t-body);font-weight:500;
+  color:var(--white);background:var(--ink);
+  border:none;border-radius:3px;padding:11px 20px;cursor:pointer;
+  transition:transform .16s var(--ease),background .16s var(--ease);
+}
+.btn:hover{background:#000}
+.btn:active{transform:translateY(1px)}
+.btn.quiet{background:transparent;color:var(--faint);padding:11px 8px}
+.btn.quiet:hover{background:transparent;color:var(--ink)}
+
+/* ── the scribble button: always there, thumb-reachable ─────── */
+#scribble{
+  position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(22px + env(safe-area-inset-bottom));
+  z-index:80;
+  font-family:'Fraunces',Georgia,serif;font-size:1.06rem;font-weight:500;
+  background:var(--ink);color:var(--white);
+  border:none;border-radius:3px;padding:15px 34px;cursor:pointer;
+  box-shadow:0 6px 18px rgba(33,37,43,0.3);
+  transition:transform .16s var(--ease);
+}
+#scribble:active{transform:translateX(-50%) translateY(2px)}
+
+/* ── the composer: a full-screen sheet of paper ─────────────── */
+#composer{
+  position:fixed;inset:0;z-index:100;
+  background:var(--stickyY);
+  display:flex;flex-direction:column;
+  padding:calc(26px + env(safe-area-inset-top)) 22px calc(22px + env(safe-area-inset-bottom));
+  opacity:0;pointer-events:none;
+  transition:opacity .2s var(--ease);
+}
+#composer.on{opacity:1;pointer-events:auto}
+#composer .chead{
+  display:flex;justify-content:space-between;align-items:center;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:var(--t-meta);color:rgba(33,37,43,0.55);
+}
+#note{
+  flex:1;width:100%;margin:18px 0;
+  background:transparent;border:none;outline:none;resize:none;
+  font-family:'Caveat',cursive;font-weight:500;
+  font-size:1.85rem;line-height:1.42;color:var(--biro);
+}
+#note::placeholder{color:rgba(29,58,107,0.34)}
+#composer .cfoot{display:flex;gap:10px;align-items:center}
+#mic{
+  font-family:'IBM Plex Sans',sans-serif;font-size:var(--t-body);
+  background:transparent;color:var(--biro);
+  border:1px solid rgba(29,58,107,0.35);border-radius:3px;
+  padding:11px 18px;cursor:pointer;
+}
+#mic.rec{background:var(--redpen);border-color:var(--redpen);color:var(--white)}
+#composer .btn{margin-left:auto}
+
+/* ── gate / states ──────────────────────────────────────────── */
+.hidden{display:none !important}
+#gate,#loading,#error{padding:70px 0;max-width:34rem}
+#gate p,#error p{color:var(--faint);margin-bottom:18px}
+#toast{
+  position:fixed;left:50%;transform:translateX(-50%) translateY(14px);
+  bottom:calc(88px + env(safe-area-inset-bottom));z-index:120;
+  background:var(--ink);color:var(--white);
+  font-size:var(--t-meta);padding:10px 18px;border-radius:3px;
+  opacity:0;pointer-events:none;transition:opacity .2s var(--ease),transform .2s var(--ease);
+  max-width:calc(100vw - 40px);
+}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+@media (max-width:520px){
+  .postit{width:calc(50% - 8px);min-height:172px;font-size:1.16rem}
+  .shelf .postit{width:calc(50% - 8px)}
+  #note{font-size:1.6rem}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition-duration:0.01ms !important}
+}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Your Desk</h1>
+    <span class="stamp" id="stamp"></span>
+  </header>
+
+  <div id="gate" class="hidden">
+    <h2>Sign in</h2>
+    <p>This desk is yours alone.</p>
+    <button class="btn" id="signin">Sign in with Google</button>
+  </div>
+
+  <div id="loading"><p class="empty">Getting your desk out…</p></div>
+
+  <div id="error" class="hidden"><p id="errtext"></p></div>
+
+  <main id="app" class="hidden">
+    <div id="desk"></div>
+
+    <h2>Holding shelf</h2>
+    <p class="sub" id="shelfsub">Done in the last day. Still amendable.</p>
+    <div class="shelf" id="shelf"></div>
+
+    <details id="bindetails">
+      <summary>The bin</summary>
+      <p class="sub">Older. Kept, in case.</p>
+      <div class="shelf" id="bin"></div>
+    </details>
+  </main>
+</div>
+
+<button id="scribble" class="hidden">Scribble a post-it</button>
+
+<div id="composer">
+  <div class="chead">
+    <span>New post-it</span>
+    <button class="btn quiet" id="cancel">Close</button>
+  </div>
+  <textarea id="note" placeholder="Say it however it comes out…" autocomplete="off" spellcheck="true"></textarea>
+  <div class="cfoot">
+    <button id="mic" class="hidden">Speak it</button>
+    <button class="btn" id="stick">Stick it on</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/interactjs@1.10.27/dist/interact.min.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   THE DESK
+
+   This page shows the board and lets Richard move paper around. It
+   does not think. Every judgement call — filing, prioritising,
+   answering, deciding — belongs to the PA in a Claude chat, on the
+   subscription. See POSTITPA.md §2.2.
+
+   The rule for anything added here: does this need to think? If yes,
+   it does not belong on this page.
+   ═══════════════════════════════════════════════════════════════════ */
+
+firebase.initializeApp({
+  apiKey: "AIzaSyA3ga4wTbLELE3jvrl40j7OclsYCt8PtIo",
+  authDomain: "morning-walks-42eb6.firebaseapp.com",
+  databaseURL: "https://morning-walks-42eb6-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "morning-walks-42eb6"
+});
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g,
+  c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+const asArray = v => Array.isArray(v) ? v : Object.values(v || {});
+const HOLD_MS = 24 * 60 * 60 * 1000;
+
+let board = null;
+
+/* ── time, said the way a person says it ─────────────────────── */
+function ago(ts){
+  const d = new Date(ts);
+  if (isNaN(d)) return "";
+  const mins = Math.floor((Date.now() - d) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + (mins === 1 ? " min ago" : " mins ago");
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + (hrs === 1 ? " hour ago" : " hours ago");
+  const days = Math.floor(hrs / 24);
+  if (days === 1) return "yesterday";
+  if (days < 7) return days + " days ago";
+  return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+}
+
+/* ── every post-it sits at a slightly different angle ──────────
+   Derived from the id so it is stable across renders: a note must
+   not jump to a new angle every time the board updates. */
+function tiltOf(id){
+  let h = 0;
+  for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) & 0xffff;
+  return ((h % 300) / 100 - 1.5).toFixed(2);   // -1.50deg … +1.49deg
+}
+
+function postit(n, kind){
+  const tilt = tiltOf(n.id);
+  const cls = ["postit", kind].filter(Boolean).join(" ");
+  const anchor = n.anchor
+    ? '<span class="anchor">on ' + esc(n.anchor) + '</span>' : "";
+  const red = n.resolution && n.resolution.text
+    ? '<span class="redpen">' + esc(n.resolution.text) + '</span>' : "";
+  const when = n.resolution && n.resolution.ts ? n.resolution.ts : n.ts;
+  return '<article class="' + cls + '" data-id="' + esc(n.id) + '" ' +
+    'style="transform:rotate(' + tilt + 'deg)" data-tilt="' + tilt + '">' +
+    anchor +
+    '<span class="txt">' + esc(n.text) + '</span>' + red +
+    '<span class="meta">' + esc(ago(when)) + '</span>' +
+    '</article>';
+}
+
+/* A question the PA is holding — its own colour, its own voice. */
+function askit(c){
+  const first = asArray(c.thread)[0] || {};
+  const tilt = tiltOf(c.id);
+  return '<article class="postit ask" data-conv="' + esc(c.id) + '" ' +
+    'style="transform:rotate(' + tilt + 'deg)" data-tilt="' + tilt + '">' +
+    '<span class="lab">Need a steer</span>' +
+    '<span class="txt">' + esc(first.text || c.topic) + '</span>' +
+    '<span class="meta">' + esc(ago(c.opened || first.ts)) + '</span>' +
+    '</article>';
+}
+
+function render(){
+  if (!board) return;
+  const notes = asArray(board.notes).filter(Boolean);
+  const now = Date.now();
+
+  const live = notes.filter(n => n.state === "open" || n.state === "parked");
+  const resolved = notes.filter(n => n.state === "resolved" && n.resolution)
+    .sort((a, b) => String(b.resolution.ts || "").localeCompare(String(a.resolution.ts || "")));
+
+  const fresh = resolved.filter(n => now - new Date(n.resolution.ts || 0) < HOLD_MS);
+  const old = resolved.filter(n => !(now - new Date(n.resolution.ts || 0) < HOLD_MS));
+
+  const asks = asArray(board.conversations).filter(c => c && c.state === "open");
+
+  $("desk").innerHTML =
+    (asks.map(askit).join("") + live.map(n => postit(n)).join("")) ||
+    '<p class="empty">Nothing waiting. Desk clear.</p>';
+
+  $("shelf").innerHTML = fresh.map(n => postit(n, "done")).join("") ||
+    '<p class="empty">Nothing actioned today yet.</p>';
+  $("shelfsub").textContent = fresh.length
+    ? fresh.length + (fresh.length === 1 ? " post-it" : " post-its") + " done in the last day. Still amendable."
+    : "Done in the last day. Still amendable.";
+
+  $("bin").innerHTML = old.slice(0, 60).map(n => postit(n, "done binned")).join("") ||
+    '<p class="empty">Empty.</p>';
+  $("bindetails").querySelector("summary").textContent =
+    "The bin" + (old.length ? " · " + old.length : "");
+
+  const stamp = board.meta && board.meta.lastUpdated;
+  $("stamp").textContent = stamp ? "last touched " + ago(stamp) : "";
+
+  bindDrag();
+}
+
+/* ── drag: paper that sticks where you put it ───────────────────
+   interact.js does the pointer maths. The tilt is preserved through
+   the drag so a post-it never snaps square in the hand, and it
+   settles back with a short spring — the one place spring easing is
+   right, because this is a physical object rather than a dialog. */
+let dragBound = false;
+function bindDrag(){
+  if (dragBound) return;
+  // If interact.js hasn't arrived — slow CDN, blocked network, offline — the
+  // desk must still be a desk. Paper you can read but not move beats a page
+  // that throws on render. Retry quietly in case it lands late.
+  if (typeof interact === "undefined") { setTimeout(bindDrag, 800); return; }
+  dragBound = true;
+  interact("#desk .postit, .shelf .postit").draggable({
+    inertia: { resistance: 18, minSpeed: 120, endSpeed: 60 },
+    listeners: {
+      start(e){
+        const t = e.target;
+        t.classList.add("lifted");
+        t.dataset.x = t.dataset.x || 0;
+        t.dataset.y = t.dataset.y || 0;
+      },
+      move(e){
+        const t = e.target;
+        const x = (parseFloat(t.dataset.x) || 0) + e.dx;
+        const y = (parseFloat(t.dataset.y) || 0) + e.dy;
+        t.dataset.x = x; t.dataset.y = y;
+        // a little extra lean in the direction of travel, like paper does
+        const lean = Math.max(-6, Math.min(6, e.dx * 0.5));
+        t.style.transform =
+          "translate(" + x + "px," + y + "px) rotate(" + (parseFloat(t.dataset.tilt) + lean) + "deg)";
+      },
+      end(e){
+        const t = e.target;
+        t.classList.remove("lifted");
+        // settle: a brief spring back to its own angle, then done
+        t.style.transition = "transform .42s cubic-bezier(0.34,1.4,0.64,1)";
+        t.style.transform =
+          "translate(" + t.dataset.x + "px," + t.dataset.y + "px) rotate(" + t.dataset.tilt + "deg)";
+        setTimeout(() => { t.style.transition = ""; }, 440);
+      }
+    }
+  });
+}
+
+/* ── the composer ───────────────────────────────────────────────
+   Capture is mechanical, so it happens here and instantly: the
+   post-it lands on the desk as soon as it is written, and nothing
+   is ever lost to a failed hand-off.
+
+   Filing is judgement, so it happens in a chat. Sticking it on
+   opens one with the scribble already in it.  */
+const composer = $("composer"), noteEl = $("note");
+
+function openComposer(){
+  composer.classList.add("on");
+  $("scribble").classList.add("hidden");
+  setTimeout(() => noteEl.focus(), 60);
+}
+function closeComposer(){
+  composer.classList.remove("on");
+  $("scribble").classList.remove("hidden");
+  stopRec();
+}
+$("scribble").addEventListener("click", openComposer);
+$("cancel").addEventListener("click", closeComposer);
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && composer.classList.contains("on")) closeComposer();
+});
+
+let toastTimer;
+function toast(msg, ms){
+  const t = $("toast");
+  t.textContent = msg; t.classList.add("on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3200);
+}
+
+$("stick").addEventListener("click", async () => {
+  const text = noteEl.value.trim();
+  if (!text) { noteEl.focus(); return; }
+  const btn = $("stick");
+  btn.disabled = true;
+  try {
+    // 1. Capture — straight onto the desk, no thinking, no waiting.
+    //
+    // Appended at the next index rather than by rewriting the array.
+    // Rewriting the whole node is what the old desk did, and it is the
+    // same shape as the stale-write bug the server fixed in v114: the
+    // PA could resolve a note in a chat while this composer was open,
+    // and a full-array write would put it back. A leaf write cannot.
+    const notes = asArray(board && board.notes).filter(Boolean);
+    await firebase.database().ref("walkReference/notes/" + notes.length).set({
+      id: "n" + Date.now(), text, ts: new Date().toISOString(), state: "open"
+    });
+    noteEl.value = "";
+    closeComposer();
+    toast("On the desk.");
+
+    // 2. Filing — judgement, so it goes to the PA in a chat.
+    window.open("https://claude.ai/new?q=" + encodeURIComponent(
+      "New post-it for the desk. Read the walk reference, then file it — and if it is " +
+      "a status update or a re-prioritisation rather than a new task, action that instead " +
+      "of adding one. Resolve the note with a one-line record of what you did. If it is " +
+      "genuinely ambiguous, ask me rather than guessing.\n\n" + text),
+      "_blank", "noopener");
+  } catch (e) {
+    toast("Didn't land: " + (e.message || e).slice(0, 90), 6000);
+  }
+  btn.disabled = false;
+});
+
+/* ── speech, using what the browser already has ──────────────── */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null;
+function stopRec(){
+  if (rec) { try { rec.stop(); } catch {} rec = null; }
+  $("mic").classList.remove("rec");
+  $("mic").textContent = "Speak it";
+}
+if (SR) {
+  $("mic").classList.remove("hidden");
+  $("mic").addEventListener("click", () => {
+    if (rec) { stopRec(); return; }
+    rec = new SR();
+    rec.lang = "en-GB";
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = e => {
+      let add = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) add += e.results[i][0].transcript;
+      noteEl.value = (noteEl.value + (noteEl.value && !/\s$/.test(noteEl.value) ? " " : "") + add.trim()).trim();
+    };
+    rec.onerror = ev => { stopRec(); toast("Microphone: " + ev.error); };
+    rec.onend = () => { if (rec) stopRec(); };
+    rec.start();
+    $("mic").classList.add("rec");
+    $("mic").textContent = "Stop";
+  });
+}
+
+/* ── sign in, then listen ───────────────────────────────────── */
+const show = id => ["gate","loading","error","app"].forEach(x =>
+  $(x).classList.toggle("hidden", x !== id));
+
+$("signin").addEventListener("click", () =>
+  firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
+    .catch(e => toast("Sign-in failed: " + e.message, 6000)));
+
+firebase.auth().onAuthStateChanged(user => {
+  if (!user) { show("gate"); $("scribble").classList.add("hidden"); return; }
+  show("loading");
+  firebase.database().ref("walkReference").on("value",
+    snap => {
+      board = snap.val();
+      show("app");
+      $("scribble").classList.remove("hidden");
+      render();
+    },
+    err => {
+      $("errtext").textContent = err.code === "PERMISSION_DENIED"
+        ? "This account doesn't have access to the desk."
+        : "Couldn't load the desk: " + err.message;
+      show("error");
+    });
+});
+</script>
+</body>
+</html>
