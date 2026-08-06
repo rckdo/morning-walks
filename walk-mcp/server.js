@@ -304,7 +304,7 @@ const archiveDelta = (board, operations, applied) =>
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "116.0" });
+  const server = new McpServer({ name: "walk-reference", version: "117.0" });
 
   server.tool(
     "get_reference",
