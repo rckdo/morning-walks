@@ -437,12 +437,20 @@ function bindDrag(){
 }
 
 /* ── the composer ───────────────────────────────────────────────
-   Capture is mechanical, so it happens here and instantly: the
-   post-it lands on the desk as soon as it is written, and nothing
-   is ever lost to a failed hand-off.
+   Drop-and-go. You scribble it, you stick it on, you carry on —
+   nothing opens, nothing asks anything of you (spec §4.1).
 
-   Filing is judgement, so it happens in a chat. Sticking it on
-   opens one with the scribble already in it.  */
+   The first version chained capture to filing: sticking a post-it on
+   also opened a chat, so the PA could file it and red-pen it within
+   seconds. That protected the instant confirmation and broke the
+   gesture it was meant to serve. Being thrown into another app is
+   the opposite of drop-and-go.
+
+   So filing waits for the PA, which is where judgement lives anyway.
+   A post-it stuck here sits yellow until you next talk to it. When
+   you want something dealt with the moment you say it, say it to the
+   PA directly — that channel is instant and always was. This one is
+   for capture, and capture should cost one tap.  */
 const composer = $("composer"), noteEl = $("note");
 
 function openComposer(){
@@ -489,14 +497,6 @@ $("stick").addEventListener("click", async () => {
     noteEl.value = "";
     closeComposer();
     toast("On the desk.");
-
-    // 2. Filing — judgement, so it goes to the PA in a chat.
-    window.open("https://claude.ai/new?q=" + encodeURIComponent(
-      "New post-it for the desk. Read the walk reference, then file it — and if it is " +
-      "a status update or a re-prioritisation rather than a new task, action that instead " +
-      "of adding one. Resolve the note with a one-line record of what you did. If it is " +
-      "genuinely ambiguous, ask me rather than guessing.\n\n" + text),
-      "_blank", "noopener");
   } catch (e) {
     toast("Didn't land: " + (e.message || e).slice(0, 90), 6000);
   }
