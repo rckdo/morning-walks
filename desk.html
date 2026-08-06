@@ -124,6 +124,65 @@ h2{
   transform:rotate(-1.4deg);transform-origin:left center;
 }
 
+/* ── the day ────────────────────────────────────────────────────
+   A ruled pad, not a task list. Rows sit in the PA's order — the desk
+   never re-sorts them, because deciding what comes first is judgement
+   and this page does not think. */
+.pad{
+  background:var(--white);
+  box-shadow:var(--lift-rest);
+  border-radius:2px;
+  padding:2px 18px;
+}
+/* The rule is the row's own underline, so it can never fall out of step
+   with the writing the way a fixed-pitch background does. */
+.row{
+  display:flex;align-items:baseline;gap:12px;
+  padding:13px 0;
+  border-bottom:1px solid rgba(29,58,107,0.10);
+  font-family:'Kalam',cursive;font-size:1.06rem;line-height:1.36;
+  color:var(--ink);
+}
+.row:last-child{border-bottom:none}
+.row .tick{
+  flex:none;width:19px;height:19px;align-self:flex-start;margin-top:1px;
+  border:1.5px solid rgba(29,58,107,0.5);border-radius:2px;
+  background:transparent;cursor:pointer;position:relative;
+  transition:border-color .15s var(--ease);
+}
+.row .tick:hover{border-color:var(--redpen)}
+.row .tick::after{
+  content:"";position:absolute;left:3px;top:-4px;
+  width:11px;height:16px;
+  border:solid var(--redpen);border-width:0 2.5px 2.5px 0;
+  transform:rotate(38deg) scale(0);transform-origin:center;
+  transition:transform .22s cubic-bezier(0.34,1.4,0.64,1);
+}
+.row.is-done .tick::after{transform:rotate(38deg) scale(1)}
+.row.is-done .what{color:var(--faint);text-decoration:line-through;text-decoration-color:var(--redpen)}
+.row.is-part .tick::after{
+  transform:none;left:2px;top:6px;width:11px;height:0;
+  border-width:0 0 2.5px 0;
+}
+.row .what{flex:1;min-width:0}
+/* The project and the owner are a quiet note to the right, the way a day
+   sheet annotates its own margin. They never push the task off its line. */
+.row .note{
+  flex:none;max-width:36%;text-align:right;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;
+  font-size:0.7rem;line-height:1.5;color:var(--faint);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.row .note b{font-weight:500;color:var(--redpen)}
+/* No urgency marking here. Nearly every planned action carries
+   urgency "now", so a mark for it fired on almost every row and told
+   Richard nothing. The plan's order is the PA's order, and that is the
+   priority signal — a second one competing with it is just noise. */
+@media (max-width:560px){
+  .row{flex-wrap:wrap}
+  .row .note{max-width:none;width:100%;text-align:left;padding-left:31px;margin-top:2px}
+}
+
 /* ── shelf and bin ──────────────────────────────────────────── */
 .shelf{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start}
 .shelf .postit{width:186px;min-height:0;font-size:1.12rem}
@@ -242,6 +301,16 @@ details[open]>summary::before{content:"▾ "}
   <div id="error" class="hidden"><p id="errtext"></p></div>
 
   <main id="app" class="hidden">
+    <h2 id="todayhead">Today</h2>
+    <p class="sub" id="todaysub"></p>
+    <div class="pad" id="today"></div>
+
+    <h2>Waiting on someone</h2>
+    <p class="sub">Not yours to do. Yours to chase.</p>
+    <div class="pad" id="waiting"></div>
+
+    <h2>Post-its</h2>
+    <p class="sub">Scribbled, not yet filed.</p>
     <div id="desk"></div>
 
     <h2>Holding shelf</h2>
@@ -356,8 +425,85 @@ function askit(c){
     '</article>';
 }
 
+/* ── the work ───────────────────────────────────────────────────
+   Actions live inside projects. Everything below finds them by id and
+   renders them in the order the PA put them in. The desk never
+   re-sorts, re-prioritises, or decides what is urgent — it shows. */
+function eachAction(fn){
+  asArray(board && board.projects).forEach((p, pi) => {
+    if (!p) return;
+    asArray(p.actions).forEach((a, ai) => { if (a && a.id) fn(a, p, pi, ai); });
+  });
+}
+function findAction(id){
+  let hit = null;
+  eachAction((a, p, pi, ai) => { if (a.id === id) hit = { a, p, pi, ai }; });
+  return hit;
+}
+const statusOf = a => ["open","part","done"].includes(a.status) ? a.status : (a.done ? "done" : "open");
+
+/* Ticking is direct manipulation, so it happens here. done stays the
+   source of truth (done === status 'done'), matching the server. */
+function tick(id){
+  const f = findAction(id);
+  if (!f) return;
+  const wasDone = statusOf(f.a) === "done";
+  const patch = wasDone
+    ? { status: "open", done: false, doneTs: null }
+    : { status: "done", done: true, bucket: "done", doneTs: f.a.doneTs || new Date().toISOString() };
+  firebase.database().ref("walkReference/projects/" + f.pi + "/actions/" + f.ai)
+    .update(patch)
+    .then(() => firebase.database().ref("walkReference/meta")
+      .update({ lastUpdated: new Date().toISOString(), updatedBy: "richard" }).catch(() => {}))
+    .catch(e => toast("Didn't save: " + (e.message || e).slice(0, 90), 6000));
+}
+
+function row(a, p){
+  const st = statusOf(a);
+  const cls = ["row", st === "done" ? "is-done" : st === "part" ? "is-part" : ""]
+    .filter(Boolean).join(" ");
+  const owner = a.owners && a.owners.primary;
+  const note = [
+    owner && owner !== "richard" ? "<b>" + esc(owner) + "</b>" : "",
+    esc(p.title || "")
+  ].filter(Boolean).join(" · ");
+  return '<div class="' + cls + '">' +
+    '<button class="tick" data-tick="' + esc(a.id) + '" aria-label="Mark done"></button>' +
+    '<span class="what">' + esc(a.text) + '</span>' +
+    (note ? '<span class="note" title="' + esc(p.title || "") + '">' + note + '</span>' : "") +
+    '</div>';
+}
+
+function renderWork(){
+  const ids = asArray(board.plan && board.plan.actionIds).map(String);
+  const byId = {};
+  eachAction(a => { byId[a.id] = a; });
+
+  // The plan's order is the PA's order. Keep it.
+  const today = ids.map(id => findAction(id)).filter(Boolean);
+  $("today").innerHTML = today.map(f => row(f.a, f.p)).join("") ||
+    '<p class="empty">No plan set for today. Ask for one.</p>';
+
+  const date = board.plan && board.plan.date;
+  const left = today.filter(f => statusOf(f.a) !== "done").length;
+  $("todaysub").textContent = !today.length ? ""
+    : (date ? date + " · " : "") +
+      (left ? left + " left of " + today.length : "all " + today.length + " done");
+
+  // Waiting: parked with someone else, or explicitly filed as waiting.
+  const wait = [];
+  eachAction((a, p) => {
+    if (statusOf(a) === "done") return;
+    const owner = a.owners && a.owners.primary;
+    if (a.bucket === "waiting" || (owner && owner !== "richard")) wait.push({ a, p });
+  });
+  $("waiting").innerHTML = wait.map(f => row(f.a, f.p)).join("") ||
+    '<p class="empty">Nothing outstanding with anyone else.</p>';
+}
+
 function render(){
   if (!board) return;
+  renderWork();
   const notes = asArray(board.notes).filter(Boolean);
   const now = Date.now();
 
@@ -390,6 +536,13 @@ function render(){
 
   bindDrag();
 }
+
+// One listener for every tick box, bound once — the rows are replaced on
+// each render, so per-element listeners would leak.
+document.addEventListener("click", e => {
+  const t = e.target.closest("[data-tick]");
+  if (t) tick(t.dataset.tick);
+});
 
 /* ── drag: paper that sticks where you put it ───────────────────
    interact.js does the pointer maths. The tilt is preserved through
