@@ -1090,7 +1090,7 @@
 
   <div id="v2zone" class="hidden">
     <div class="autobar">
-      <span class="cdlabel">Next auto-mark in <b id="cdTimer">--:--</b></span>
+      <span class="cdlabel">Mark the board</span>
       <span class="est" id="markEst"></span>
       <button id="markNowBtn">mark now</button>
     </div>
@@ -1223,8 +1223,7 @@
   firebase.auth().onAuthStateChanged(user => {
     if (!user) { show("gate"); return; }
     show("loading");
-    firebase.database().ref("apiUsage").on("value",
-      snap => renderSpend(snap.val()), () => {});
+    renderSpend();   // v117: nothing spends money, so nothing is metered
     firebase.database().ref("reviewState").on("value",
       snap => { reviewState = snap.val(); updateMarkEst(); }, () => {});
     firebase.database().ref("walkReference").on("value",
@@ -2701,7 +2700,6 @@
   }
 
   /* ---------- Q&A panel ---------- */
-  const ANSWER_URL = "https://morning-walks-419435526393.europe-west1.run.app/answer/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
   $("qaAskBtn").addEventListener("click", () => {
     const inp = $("qaInput");
     if (!inp.value.trim()) return;
@@ -2709,30 +2707,20 @@
     inp.value = "";
   });
   $("qaInput").addEventListener("keydown", e => { if (e.key === "Enter") $("qaAskBtn").click(); });
-  // Deliberately on demand: the silent hourly file pass has no channel to reply,
-  // so it never answers. This does, and writes the answer into the thread.
-  $("qaAnswerBtn").addEventListener("click", async () => {
-    const btn = $("qaAnswerBtn"), st = $("qaStatus");
-    btn.disabled = true; st.textContent = "answering…";
-    try {
-      const r = await fetch(ANSWER_URL, { method: "POST" });
-      const text = await r.text();
-      if (!r.ok) throw new Error(text || ("HTTP " + r.status));
-      st.textContent = "";
-      toast(text || "Answered.");
-    } catch (e) {
-      st.textContent = "";
-      toast("Answer pass not live — opening a Claude chat instead.");
-      window.open("https://claude.ai/new?q=" + encodeURIComponent(
-        "Read the walk reference and answer every open question in conversations[] — " +
-        "write each answer into its thread with answerQuestion. Never mark one answered without an answer."),
-        "_blank", "noopener");
-    }
-    btn.disabled = false;
+  // v117: the server-side answer pass is deleted. Questions are answered by
+  // Claude in a chat, on the subscription — which is also the only place that
+  // can read this repo and so answer honestly about the tool itself.
+  // The old pass could not, and got six of eight wrong. See SELF-KNOWLEDGE.md.
+  $("qaAnswerBtn").addEventListener("click", () => {
+    window.open("https://claude.ai/new?q=" + encodeURIComponent(
+      "Read the walk reference and answer every open question in conversations[] — " +
+      "write each answer into its thread with answerQuestion. Never mark one answered " +
+      "without an answer: if you cannot ground it in the board or the repo, leave it open " +
+      "and say which fact you need."),
+      "_blank", "noopener");
   });
 
   /* ---------- Mark It ---------- */
-  const REVIEW_URL = "https://morning-walks-419435526393.europe-west1.run.app/review/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
   let toastTimer;
   function toast(msg, ms){
     const t = $("toast");
@@ -2740,18 +2728,11 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.classList.remove("on"), ms || 3500);
   }
-  /* ---------- auto-mark bar ---------- */
-  const RUN_MINUTE = 36;   // the scheduled task fires at :36 past each hour — update if the schedule changes
+  /* ---------- mark bar ----------
+     v117: the hourly countdown is gone with the scheduled pass it counted down
+     to. Waiting for a timer was the thing that made the desk feel stale; there
+     is nothing to wait for now. The bar keeps the change count and the button. */
   let reviewState = null;
-  setInterval(() => {
-    const el = $("cdTimer"); if (!el) return;
-    const now = new Date();
-    const next = new Date(now);
-    next.setMinutes(RUN_MINUTE, 0, 0);
-    if (next <= now) next.setHours(next.getHours() + 1);
-    const secs = Math.floor((next - now) / 1000);
-    el.textContent = String(Math.floor(secs / 60)).padStart(2, "0") + ":" + String(secs % 60).padStart(2, "0");
-  }, 1000);
 
   async function sha256hex(str){
     const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
@@ -2777,7 +2758,7 @@
     try {
       const sig = await clientSignature();
       if (reviewState && reviewState.sig === sig) {
-        el.textContent = "free — nothing new to judge (auto run will skip too)";
+        el.textContent = "nothing new since the last mark";
         return;
       }
       let countTxt = "";
@@ -2800,12 +2781,9 @@
         if ((state.plan?.date || "") !== (b.date || "")) c++;
         if (c) countTxt = c + " change" + (c > 1 ? "s" : "") + " waiting \u00b7 ";
       }
-      const ctx = { ...state };
-      delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
-      delete ctx.ideas; delete ctx.claudesTake;
-      const tokens = JSON.stringify(ctx).length / 4 + 500;
-      const pence = Math.max(1, Math.round((tokens * 3e-6 + 500 * 15e-6) * 79));
-      el.textContent = countTxt + "\u2248 " + pence + "p \u00b7 or wait for the free run";
+      // v117: no cost estimate, because there is no cost. The change count is
+      // the only honest thing this line ever said, so it is all that is left.
+      el.textContent = countTxt.replace(/ \u00b7 $/, "");
     } catch { el.textContent = ""; }
   }
   $("markNowBtn").addEventListener("click", () => {
@@ -2814,46 +2792,26 @@
     setTimeout(() => { b.disabled = false; }, 4000);
   });
 
-  /* ---------- spend meter ---------- */
-  function renderSpend(u){
-    const el = $("spendTally");
-    if (!u || !u.calls) { el.textContent = ""; return; }
-    const usd = (u.inTok || 0) * 3 / 1e6 + (u.outTok || 0) * 15 / 1e6;
-    const since = u.since ? new Date(u.since) : null;
-    el.textContent = "\u2248 $" + usd.toFixed(2) + " used \u00b7 " + u.calls + " calls" +
-      (since && !isNaN(since) ? " since " + since.toLocaleDateString("en-GB", { day: "2-digit", month: "2-digit" }) : "");
-  }
+  /* ---------- spend meter \u2014 retired in v117 ----------
+     Nothing here spends money any more, so there is nothing to meter. Kept as
+     an empty render rather than a deletion because the desk is being rebuilt
+     and this element goes with it. */
+  function renderSpend(){ $("spendTally").textContent = ""; }
 
-  /* ---------- Tools: /assist ---------- */
-  const ASSIST_URL = "https://morning-walks-419435526393.europe-west1.run.app/assist/qT4nXw8bKm2ZpV6cRj9dLsY5hB3";
-  async function runAssist(fn, input, statusEl, outEl, headEl, btn){
-    const user = firebase.auth().currentUser;
-    if (!user) { statusEl.textContent = "sign in first"; return; }
-    btn.disabled = true;
-    statusEl.textContent = "drafting…";
-    try {
-      const token = await user.getIdToken();
-      const r = await fetch(ASSIST_URL, {
-        method: "POST",
-        headers: { "content-type": "application/json", "authorization": "Bearer " + token },
-        body: JSON.stringify({ function: fn, input: input })
-      });
-      const text = await r.text();
-      if (!r.ok) throw new Error(text || ("HTTP " + r.status));
-      outEl.textContent = text;
-      outEl.classList.remove("hidden");
-      headEl.classList.remove("hidden");
-      statusEl.textContent = "";
-    } catch (e) {
-      statusEl.textContent = "failed: " + (e.message || e).slice(0, 120);
-    }
-    btn.disabled = false;
-  }
+  /* ---------- Tools: email composer ----------
+     v117: the server-side /assist composer is deleted. Drafting is a judgement
+     job, so it happens where the judgement lives — a chat on the subscription,
+     which can also ask a follow-up question before drafting. The old one could
+     only guess or leave a placeholder. */
   $("composeBtn").addEventListener("click", () => {
     const input = $("composeInput").value.trim();
     if (!input) { $("composeStatus").textContent = "give it some context first"; return; }
-    runAssist("compose_email", input, $("composeStatus"), $("composeOutput"),
-      $("composeOutHead"), $("composeBtn"));
+    window.open("https://claude.ai/new?q=" + encodeURIComponent(
+      "Read the walk reference for context, then draft this email as me. British English, " +
+      "concise, warm but direct, no corporate filler. Invent nothing — if a fact would " +
+      "strengthen it and you haven't got it, ask me rather than guessing.\n\n" + input),
+      "_blank", "noopener");
+    $("composeStatus").textContent = "";
   });
   $("composeCopy").addEventListener("click", () => {
     navigator.clipboard.writeText($("composeOutput").textContent)
@@ -2861,22 +2819,12 @@
       .catch(() => toast("Copy failed — select and copy manually."));
   });
 
-  $("markBtn").addEventListener("click", async () => {
-    const btn = $("markBtn");
-    btn.disabled = true;
-    toast("Asking Claude to mark the board…", 8000);
-    try {
-      const r = await fetch(REVIEW_URL, { method: "POST" });
-      const text = await r.text();
-      if (r.ok) toast(text || "Marked — watch the margin.");
-      else throw new Error(text || ("HTTP " + r.status));
-    } catch (e) {
-      toast("Reviewer not live — opening a Claude chat instead.");
-      window.open("https://claude.ai/new?q=" + encodeURIComponent(
-        "Run a walk judgement: read the walk reference, judge the day's shape, reply into any stacks and idea threads where the last word was mine, and write it all back."),
-        "_blank", "noopener");
-    }
-    btn.disabled = false;
+  // v117: the scheduled reviewer is deleted. Judgement happens in a chat, on
+  // the subscription, when Richard asks for it — not on a timer he waits out.
+  $("markBtn").addEventListener("click", () => {
+    window.open("https://claude.ai/new?q=" + encodeURIComponent(
+      "Run a walk judgement: read the walk reference, judge the day's shape, reply into any stacks and idea threads where the last word was mine, and write it all back."),
+      "_blank", "noopener");
   });
 
   function fmtTs(ts){
