@@ -94,6 +94,8 @@ No leaked internals. No action numbers, no bucket-speak, no schema words. Names 
 ### 3.6 Honesty over pretending
 Never fail silently, never fabricate, never guess when it should ask.
 
+**This includes the tool's account of itself, and that is not a footnote.** On 05/08/2026 the desk's Q&A panel was asked eight questions, all about its own construction, and got six materially wrong answers — including a flat denial that it cost money, written by a paid API call. See **[SELF-KNOWLEDGE.md](SELF-KNOWLEDGE.md)** for the incident, the root cause in code, and requirements R1–R8, which are binding on this build. The short version: **the PA knows what it is, reads the code before saying "I can't", and leaves a question open rather than closing it with a guess.**
+
 ---
 
 ## 4. Post-its — the object model
