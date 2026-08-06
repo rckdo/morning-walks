@@ -213,7 +213,7 @@ Everything below exists today and does not survive the rebuild.
 - Firebase auth and the RTDB rules
 - The widget gallery in `index.html` as the seed for the toolkit page
 
-The patch-op vocabulary gets renamed to post-it terms, but the mechanism stands.
+**The patch ops keep their existing names.** The draft said rename them to post-it terms; on building it, that's churn for no gain — Richard never sees an op name, only the PA does. Renaming them would break the desk app for a cosmetic change to something already invisible. Instead the PA skill carries the translation table (*"done the directory"* → `setStatus`), which is where the plain-English rule actually bites: §3.5 governs what reaches Richard, not what the plumbing calls itself.
 
 ---
 

@@ -1,10 +1,39 @@
 /*
-  MORNING WALK — MCP SERVER + AMBIENT REVIEWER
-  v116.1 — 05/08/2026
-  (Supersedes v78 / v82 / v87 / v88 / v90 / v94 / v114 / v115 — deploy this
-   one; earlier server files from this build are obsolete. See VERSIONING.md.)
+  POSTITPA — BOARD SERVER
+  v117.0 — 06/08/2026
+  (Supersedes every earlier server file in this build — deploy this one.)
+
+  This server reads and writes the board. It does not think. There is no
+  model call in this file and no API key on the service.
 
   Changelog:
+  v117.0 — The server stops thinking. Deleted /review (the scheduled watcher),
+           /answer (the Q&A pass), /assist (the email composer), the
+           ANTHROPIC_API_KEY they ran on, the /apiUsage spend tally and
+           REVIEW_SECRET. 478 lines gone, and with them every paid call and
+           the twice-daily staleness they caused.
+
+           Two reasons, and the second is the one that mattered.
+
+           Cost: those three endpoints were the only paid plumbing. Judgement
+           now happens in a Claude client on the Max subscription, in the same
+           conversational turn as the request — so filing is instant instead
+           of waiting for a timer, and free instead of metered.
+
+           Honesty: a server that thinks has no way of knowing what it is. On
+           05/08 the answer pass was asked eight questions about the tool's own
+           construction and got six materially wrong — including a flat denial
+           that it cost money, written by a paid call, and a description of
+           itself as unbuilt issued from inside itself. It could not have known
+           better: nothing in its payload said what it was. Claude in a client
+           can read this repo. Deleting the thinking here is what makes the
+           self-knowledge requirements (SELF-KNOWLEDGE.md, R1-R8) achievable
+           rather than aspirational.
+
+           Kept whole: the read/write spine (get/patch/update_reference), the
+           v114 concurrency fix, the v116.1 bounded archive, the v3 object
+           model. The board's shape is unchanged — this is a removal, not a
+           migration, and every existing board keeps working.
   v116.1 — Bounded archive. Every write used to stash a full copy of the
            board under walkReferenceHistory with nothing pruning it — 7.66 MB
            across 153 snapshots against a live board of 133 KB, 98% of the
@@ -117,20 +146,20 @@
 */
 
 const express = require("express");
-const crypto = require("crypto");
 const { McpServer } = require("@modelcontextprotocol/sdk/server/mcp.js");
 const { StreamableHTTPServerTransport } = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
 const { z } = require("zod");
 const admin = require("firebase-admin");
 
 const SECRET = "wR7kPm2ZqXv9TnE4bYcH8dLsJ3fA";        // MCP capability URL — unchanged from v20.0
-const REVIEW_SECRET = "qT4nXw8bKm2ZpV6cRj9dLsY5hB3";   // separate secret for the scheduler endpoint
 const PATH = "/mcp/" + SECRET;
-const REVIEW_PATH = "/review/" + REVIEW_SECRET;
 const NODE = "walkReference";
 const HISTORY = "walkReferenceHistory";
-const REVIEW_STATE = "reviewState";
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY || "";
+
+// There is no API key here, and there must never be one again. This server
+// reads and writes the board; it does not think. Every judgement call is made
+// by Claude in a client Richard is actually talking to, on the subscription.
+// See SELF-KNOWLEDGE.md for what the thinking-server cost us.
 
 admin.initializeApp({
   credential: admin.credential.applicationDefault(),
@@ -271,18 +300,6 @@ const archiveDelta = (board, operations, applied) =>
     before: touchedBefore(board, operations)
   }, OPS_KEEP).catch(e => console.error("archiveDelta failed", e));
 
-// Self-kept spend tally: every Anthropic response reports its own token usage;
-// accumulate it in /apiUsage so the desk app can show a live meter.
-function recordUsage(u) {
-  if (!u) return;
-  db.ref("apiUsage").transaction(cur => {
-    cur = cur || { calls: 0, inTok: 0, outTok: 0, since: new Date().toISOString() };
-    cur.calls += 1;
-    cur.inTok += u.input_tokens || 0;
-    cur.outTok += u.output_tokens || 0;
-    return cur;
-  }).catch(e => console.error("usage tally failed", e));
-}
 
 /* ============================== MCP tools ============================== */
 
@@ -796,433 +813,6 @@ function buildServer() {
   return server;
 }
 
-/* ============================ Ambient review ============================ */
-
-// Signature of Richard-authored content only — Claude's own outputs are
-// excluded so a review never triggers the next review.
-function richardSignature(ref) {
-  const tasks = asArray(ref.todaysPlan?.tasks).map(t => ({
-    id: t.id, text: t.text, done: !!t.done,
-    notes: asArray(t.notes).map(n => ({ ts: n.ts, text: n.text })),
-    thread: asArray(t.thread).filter(e => e.who === "richard").map(e => ({ ts: e.ts, text: e.text }))
-  }));
-  const ideas = asArray(ref.ideas).map(i => ({
-    id: i.id, title: i.title, state: i.state,
-    thread: asArray(i.thread).filter(e => e.who === "richard").map(e => ({ ts: e.ts, text: e.text }))
-  }));
-  const payload = JSON.stringify({
-    date: ref.todaysPlan?.date || "",
-    tasks, ideas,
-    notes: asArray(ref.richardsNotes).map(n => ({ ts: n.ts, text: n.text }))
-  });
-  return crypto.createHash("sha256").update(payload).digest("hex");
-}
-
-const REVIEW_SYSTEM = `You are the ambient reviewer for Richard's Morning Walk rolling reference — a candid colleague glancing at his live board because something on it just changed. Richard is Digital & Broadcast Manager at the National League.
-
-Return ONLY a JSON object, no markdown fences, no prose outside it:
-{
-  "take": "2-4 sentence headline verdict on the day's shape right now",
-  "taskNotes": { "<taskId>": "<mark, max 12 words>", ... },
-  "ideaReplies": { "<ideaId>": "<steer, 1-3 sentences>", ... }
-}
-
-Rules:
-- taskNotes: a proposed sticky reply per task where warranted (appended to the task thread only if new, or answering Richard's latest sticky). Verdict-flavoured, useful, max 12 words. Hard deadlines and unrecoverable items always outrank the merely urgent. Repeat carry-overs get named as such. Done tasks get brief acknowledgement. Weekends: judge accordingly — do not manufacture weekday urgency on a Saturday.
-- ideaReplies: ONLY for ideas listed as eligible in the user message, and ONLY when you have genuine steer — an angle, a risk, a sharpener, a connection to his fronts. Substance over cheerleading. Omit an idea entirely if you have nothing real to add. Never summarise the idea back at him.
-- take: teeth, earned. If nothing material changed or the day is on track, say so in one line — a clean bill is a valid verdict. Never invent urgency.
-- Judge the work, never the people. Fronts contain frank notes on named colleagues; do not extend or editorialise on personal assessments.
-- If the state doesn't show it, it didn't happen.`;
-
-async function runReview() {
-  if (!ANTHROPIC_KEY) return { status: 500, body: "ANTHROPIC_API_KEY not set on the service." };
-
-  const snap = await db.ref(NODE).get();
-  if (!snap.exists()) return { status: 404, body: "walkReference is empty." };
-  const ref = snap.val();
-
-  if (ref.projects) return runReviewV2(ref);
-
-  const sig = richardSignature(ref);
-  const prevState = (await db.ref(REVIEW_STATE).get()).val() || {};
-  if (prevState.sig === sig) return { status: 200, body: "No change since last review — skipped." };
-
-  // Ideas eligible for a reply: last thread entry is Richard's (never reply twice in a row).
-  const eligibleIdeas = asArray(ref.ideas).filter(i => {
-    const th = asArray(i.thread);
-    return th.length && th[th.length - 1].who === "richard" && i.state !== "parked";
-  }).map(i => i.id);
-
-  const userMsg =
-    "Current time: " + new Date().toISOString() + " (UK)\n" +
-    "Ideas eligible for a reply (last word was Richard's): " + JSON.stringify(eligibleIdeas) + "\n\n" +
-    "Full reference state:\n" + JSON.stringify(ref);
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": ANTHROPIC_KEY,
-      "anthropic-version": "2023-06-01"
-    },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1500,
-      system: REVIEW_SYSTEM,
-      messages: [{ role: "user", content: userMsg }]
-    })
-  });
-  if (!resp.ok) {
-    const errText = await resp.text();
-    console.error("Anthropic API error:", resp.status, errText);
-    return { status: 502, body: "Anthropic API error " + resp.status };
-  }
-  const data = await resp.json();
-  recordUsage(data.usage);
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-
-  let verdict;
-  try { verdict = JSON.parse(text.replace(/```json|```/g, "").trim()); }
-  catch (e) {
-    console.error("Unparseable review output:", text);
-    return { status: 502, body: "Review output was not valid JSON — nothing written." };
-  }
-
-  const now = new Date().toISOString();
-
-  // Archive, then merge the verdict into the reference.
-  await archiveFull(ref);
-
-  const tasks = asArray(ref.todaysPlan?.tasks);
-  tasks.forEach(t => {
-    // fold legacy fields into the unified thread, then append the new mark
-    const th = asArray(t.thread).map(e => ({ ts: e.ts || "", who: e.who === "claude" ? "claude" : "richard", text: e.text || "" }));
-    asArray(t.notes).forEach(n => th.push({ ts: n.ts || "", who: "richard", text: n.text || "" }));
-    if (t.claudeNote && t.claudeNote.text) th.push({ ts: t.claudeNote.ts || "", who: "claude", text: t.claudeNote.text });
-    th.sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
-    const mark = verdict.taskNotes && verdict.taskNotes[t.id];
-    const last = th[th.length - 1];
-    const lastClaude = [...th].reverse().find(e => e.who === "claude");
-    if (mark && (!last || last.who === "richard" || !lastClaude || lastClaude.text !== String(mark))) {
-      th.push({ ts: now, who: "claude", text: String(mark) });
-    }
-    t.thread = th;
-    delete t.notes; delete t.claudeNote;
-  });
-  if (ref.todaysPlan) ref.todaysPlan.tasks = tasks;
-
-  const ideas = asArray(ref.ideas);
-  ideas.forEach(i => {
-    const reply = verdict.ideaReplies && verdict.ideaReplies[i.id];
-    const th = asArray(i.thread);
-    if (reply && th.length && th[th.length - 1].who === "richard") {   // enforced server-side too
-      th.push({ ts: now, who: "claude", text: String(reply) });
-      i.thread = th;
-    }
-  });
-  if (ideas.length) ref.ideas = ideas;
-
-  if (verdict.take) {
-    const takes = asArray(ref.claudesTake);
-    takes.push({ ts: now, take: String(verdict.take) });
-    ref.claudesTake = takes.slice(-10);
-  }
-
-  ref.meta = ref.meta || {};
-  ref.meta.lastReviewed = now;          // deliberately NOT lastUpdated — "Compiled" stamp stays honest
-
-  await db.ref(NODE).set(ref);
-  await db.ref(REVIEW_STATE).set({ sig, ts: now });
-
-  return { status: 200, body: "Review written at " + now + " (" +
-    Object.keys(verdict.taskNotes || {}).length + " task marks, " +
-    Object.keys(verdict.ideaReplies || {}).length + " idea replies)." };
-}
-
-/* ------------------------- v2 (Director/Author) ------------------------ */
-
-// v116: the tick map alone missed the mid-states. A task moving open -> part, or
-// being refiled from In progress to Waiting, is a real change and must wake a
-// review the way a tick does. The desk mirrors this exactly (clientSignature).
-function v3Maps(ref) {
-  const done = {}, status = {}, bucket = {};
-  asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
-    done[a.id] = !!a.done;
-    status[a.id] = taskStatus(a);
-    bucket[a.id] = a.bucket || "";
-  }));
-  return { done, status, bucket };
-}
-function v2Signature(ref) {
-  const notes = asArray(ref.notes).filter(n => n.state === "open")
-    .map(n => ({ id: n.id, text: n.text }));
-  const { done, status, bucket } = v3Maps(ref);
-  return crypto.createHash("sha256")
-    .update(JSON.stringify({ notes, done, status, bucket, date: ref.plan?.date || "" })).digest("hex");
-}
-
-const REVIEW_V2_SYSTEM = `You are the mid-day reviewer of Richard's v2 Walk Reference (Director/Author board). This is judgement, not compile: actions and resolutions only — no restructuring, no new projects or actions, no summary rewrites. Richard is Digital & Broadcast Manager at The National League.
-
-Return ONLY a JSON object, no fences:
-{
-  "take": "2-4 sentence verdict on the day's shape right now",
-  "tickActionIds": ["a3"],
-  "partActionIds": ["a5"],
-  "actionUpdates": { "a5": "progress note, one line" },
-  "noteResolutions": { "n7": "answered — one line" },
-  "diffWhat": "one line describing any changes made, or null"
-}
-
-Rules:
-- take: teeth, earned. Hard dates and unrecoverable items outrank everything. If nothing has changed, say so in one line — a clean bill is a valid verdict.
-- tickActionIds: ONLY actions the board itself evidences as complete. No fabricated completions — if the state doesn't show it, it didn't happen.
-- partActionIds: tasks the board evidences as genuinely in flight but NOT finished (status 'part'). Treat 'part' as carryable-not-ignored — surface the latest update rather than reading the item as untouched.
-- actionUpdates: a progress note attached to a task WITHOUT ticking it, when the board shows movement short of completion. One line each, evidenced.
-- noteResolutions: ONLY for open notes you can genuinely answer or action from the board. One line each (answered / actioned / pushed back — with why). Leave notes you cannot resolve untouched — compile will take them.
-- Do NOT touch conversations[]. An open question is answered by a chat or the on-demand answer pass, never here — a question is never silently resolved.
-- Never edit Richard's words. Judge the work, never the people; do not extend assessments of named colleagues.
-- Weekend/evening: judge accordingly; do not manufacture office-hours urgency.`;
-
-async function runReviewV2(ref) {
-  const sig = v2Signature(ref);
-  const prevState = (await db.ref(REVIEW_STATE).get()).val() || {};
-  if (prevState.sig === sig) return { status: 200, body: "No change since last review — skipped." };
-
-  const ctx = { ...ref };
-  delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
-  delete ctx.ideas; delete ctx.claudesTake;
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1200,
-      system: REVIEW_V2_SYSTEM,
-      messages: [{ role: "user", content:
-        "Current time: " + new Date().toISOString() + " (UK)\n\nBoard:\n" + JSON.stringify(ctx) }] })
-  });
-  if (!resp.ok) {
-    console.error("Anthropic API error:", resp.status, await resp.text());
-    return { status: 502, body: "Anthropic API error " + resp.status };
-  }
-  const data = await resp.json();
-  recordUsage(data.usage);
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-  let v;
-  try { v = JSON.parse(text.replace(/```json|```/g, "").trim()); }
-  catch { return { status: 502, body: "Review output was not valid JSON — nothing written." }; }
-
-  const now = new Date().toISOString();
-  await archiveFull(ref);
-
-  let changed = 0;
-  const diffs = asArray(ref.diffs);
-  const diffId = "d" + (diffs.length + 1);
-
-  asArray(v.tickActionIds).forEach(id => {
-    asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
-      if (a.id === id && !a.done) { syncStatus(a, "done"); changed++; }
-    }));
-  });
-  // Mid-states: a task the board evidences as in-flight but not finished.
-  if (v.partActionIds) asArray(v.partActionIds).forEach(id => {
-    asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
-      if (a.id === id && taskStatus(a) === "open") { syncStatus(a, "part"); changed++; }
-    }));
-  });
-  // Progress logged without a tick — the op whose absence forced logging
-  // progress as brand-new actions.
-  if (v.actionUpdates && typeof v.actionUpdates === "object") {
-    Object.keys(v.actionUpdates).forEach(id => {
-      asArray(ref.projects).forEach(p => asArray(p.actions).forEach(a => {
-        if (a.id !== id) return;
-        a.updates = asArray(a.updates);
-        const text = String(v.actionUpdates[id]);
-        if (a.updates.some(u => u.text === text)) return;     // never log the same update twice
-        a.updates.push({ text, ts: now });
-        changed++;
-      }));
-    });
-  }
-  if (v.noteResolutions && typeof v.noteResolutions === "object") {
-    asArray(ref.notes).forEach(n => {
-      const r = v.noteResolutions[n.id];
-      if (r && n.state === "open") {
-        n.state = "resolved";
-        n.resolution = { ts: now, text: String(r), diffId };
-        changed++;
-      }
-    });
-  }
-  if (changed && v.diffWhat) {
-    diffs.push({ id: diffId, ts: now, changes: [{ what: String(v.diffWhat), why: "mid-day judgement (server review)" }] });
-    ref.diffs = diffs.slice(-5);
-  }
-  if (v.take) ref.take = [{ ts: now, text: String(v.take) }];
-
-  ref.meta = ref.meta || {};
-  ref.meta.lastReviewed = now;
-
-  await db.ref(NODE).set(ref);
-
-  const maps = v3Maps(ref);
-  const basisNotes = {};
-  asArray(ref.notes).filter(n => n.state === "open").forEach(n => {
-    basisNotes[n.id] = crypto.createHash("sha256").update(String(n.text || "")).digest("hex");
-  });
-  await db.ref(REVIEW_STATE).set({ sig: v2Signature(ref), ts: now,
-    basis: { done: maps.done, status: maps.status, bucket: maps.bucket,
-             notes: basisNotes, date: ref.plan?.date || "" } });
-
-  return { status: 200, body: "Marked at " + now + " (" + changed + " change(s)" +
-    (v.take ? ", take replaced" : "") + ")." };
-}
-
-/* ==================== Open questions — on-demand pass ====================
-   Section 8 of the v3 spec: a question is NEVER silently resolved. It stays
-   open and shows prominently until an answer is written into its thread.
-   Answers come from a chat or from THIS pass — deliberately not from the
-   silent hourly file pass, which has no channel to reply. */
-
-const ANSWER_SYSTEM = `You are answering the open questions on Richard's Walk Reference board. Richard is Digital & Broadcast Manager at The National League (English football's fifth tier).
-
-You receive the live board and the list of open conversations. Answer each one you can actually answer from the board and your own judgement.
-
-Return ONLY a JSON object, no fences:
-{ "answers": { "<convId>": "<the answer, 1-6 sentences>" } }
-
-Rules:
-- Answer the question that was asked. No summarising it back, no restating the board.
-- Where the answer is a workflow or a rule, state the rule plainly and say why it is the rule.
-- If you genuinely cannot answer one from the board, OMIT it — leaving it open is correct and honest. Never write a non-answer to clear the badge; an unanswered question that stays open is the feature, not the failure.
-- Fabricate nothing. If the answer depends on a fact the board does not hold, say exactly which fact you need.
-- British English. Concise, direct, no filler. Judge the work, never the people.`;
-
-async function runAnswerPass() {
-  if (!ANTHROPIC_KEY) return { status: 500, body: "ANTHROPIC_API_KEY not set on the service." };
-  const snap = await db.ref(NODE).get();
-  if (!snap.exists()) return { status: 404, body: "walkReference is empty." };
-  const ref = snap.val();
-
-  const open = asArray(ref.conversations).filter(c => c && c.state === "open");
-  if (!open.length) return { status: 200, body: "No open questions — nothing to answer." };
-
-  const ctx = { ...ref };
-  delete ctx.todaysPlan; delete ctx.fronts; delete ctx.richardsNotes;
-  delete ctx.ideas; delete ctx.claudesTake; delete ctx.diffs;
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 2000,
-      system: ANSWER_SYSTEM,
-      messages: [{ role: "user", content:
-        "Current time: " + new Date().toISOString() + " (UK)\n\n" +
-        "Open questions:\n" + JSON.stringify(open.map(c => ({ id: c.id, topic: c.topic, thread: c.thread }))) +
-        "\n\nBoard:\n" + JSON.stringify(ctx) }] })
-  });
-  if (!resp.ok) {
-    console.error("Anthropic API error:", resp.status, await resp.text());
-    return { status: 502, body: "Anthropic API error " + resp.status };
-  }
-  const data = await resp.json();
-  recordUsage(data.usage);
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n");
-  let v;
-  try { v = JSON.parse(text.replace(/```json|```/g, "").trim()); }
-  catch { return { status: 502, body: "Answer output was not valid JSON — nothing written." }; }
-
-  const now = new Date().toISOString();
-  await archiveFull(ref);
-
-  let answered = 0;
-  const convs = asArray(ref.conversations);
-  Object.keys(v.answers || {}).forEach(cid => {
-    const c = convs.find(x => x.id === cid);
-    if (!c || c.state !== "open") return;
-    const body = String(v.answers[cid] || "").trim();
-    if (!body) return;                                  // no answer written = stays open
-    c.thread = asArray(c.thread);
-    c.thread.push({ author: "claude", text: body, ts: now });
-    c.state = "answered";
-    answered++;
-  });
-  if (!answered) return { status: 200, body: "Nothing answerable from the board — " + open.length + " question(s) left open." };
-
-  ref.conversations = convs;
-  ref.meta = ref.meta || {};
-  ref.meta.lastReviewed = now;
-  await db.ref(NODE).set(ref);
-  return { status: 200, body: "Answered " + answered + " of " + open.length + " open question(s) at " + now + "." };
-}
-
-/* ============================ Assist tools ============================ */
-
-const ASSIST_PATH = "/assist/" + REVIEW_SECRET;   // same capability segment; real auth is the Firebase ID token
-
-const ASSIST_FUNCTIONS = {
-  compose_email: {
-    boardContext: true,
-    maxTokens: 1500,
-    system: `You are the email composer inside Richard's Morning Walk desk app. Richard is Digital & Broadcast Manager at The National League (English football's fifth tier).
-
-You receive the live walk board (JSON) as context. Use it to resolve names, situations, dates and stakes the request refers to — but never leak board contents the email's recipient shouldn't see (internal candour, colleague assessments, Claude commentary). The board informs you; it is not quotable material.
-
-HARD RULE — fabricate nothing. Every factual element of the draft must come from the board or the request: no invented personal details (surnames, genders, pronouns, honorifics, roles), and equally no invented events, meetings, conversations, agreements, dates, deadlines, figures, prices, quotes or history. If a fact would strengthen the email but you do not have it, either write around it or leave an explicit [bracketed placeholder] for Richard to fill in. A plausible invention is a failed draft — an obvious gap is a successful one.
-
-ASK FIRST when the gap is central: if the request lacks context essential to a credible draft (who it is actually to, what it must achieve, a key fact the email hinges on), do NOT draft. Instead output up to four lines, each starting "NEED: ", asking the specific questions. Richard adds the answers to his request and resubmits. Placeholders are for peripheral gaps; questions are for central ones.
-
-House style: British English. Concise — short paragraphs, no padding, lead with the point. Warm but direct. No corporate filler ("I hope this finds you well", "please don't hesitate"). Sign off as Richard.
-
-Output EXACTLY this format and nothing else:
-Subject: <subject line>
-
-<email body>`
-  }
-};
-
-async function verifyRichard(req) {
-  const h = req.headers.authorization || "";
-  if (!h.startsWith("Bearer ")) return null;
-  try {
-    const decoded = await admin.auth().verifyIdToken(h.slice(7));
-    return decoded.email === "rckdorman@gmail.com" ? decoded : null;
-  } catch { return null; }
-}
-
-async function runAssist(fnName, input) {
-  if (!ANTHROPIC_KEY) return { status: 500, body: "ANTHROPIC_API_KEY not set on the service." };
-  const fn = ASSIST_FUNCTIONS[fnName];
-  if (!fn) return { status: 404, body: "Unknown function: " + fnName };
-  if (!input || typeof input !== "string" || !input.trim())
-    return { status: 400, body: "Empty input." };
-
-  let userMsg = "Request:\n" + input.trim();
-  if (fn.boardContext) {
-    const snap = await db.ref(NODE).get();
-    if (snap.exists()) {
-      const board = snap.val();
-      delete board.todaysPlan; delete board.fronts;   // v1 mirror adds tokens, not context
-      delete board.richardsNotes; delete board.ideas; delete board.claudesTake;
-      userMsg = "Current walk board (context):\n" + JSON.stringify(board) + "\n\n" + userMsg;
-    }
-  }
-
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: fn.maxTokens || 1200,
-      system: fn.system, messages: [{ role: "user", content: userMsg }] })
-  });
-  if (!resp.ok) {
-    console.error("Anthropic API error:", resp.status, await resp.text());
-    return { status: 502, body: "Anthropic API error " + resp.status };
-  }
-  const data = await resp.json();
-  recordUsage(data.usage);
-  const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
-  return { status: 200, body: text || "(empty response)" };
-}
-
 /* ================================ HTTP ================================ */
 
 const app = express();
@@ -1242,46 +832,7 @@ app.post(PATH, async (req, res) => {
 });
 app.get(PATH, (_req, res) => res.status(405).send("POST only"));
 
-const cors = res => {
-  res.set("Access-Control-Allow-Origin", "https://rckdo.github.io");
-  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-};
-const reviewHandler = async (_req, res) => {
-  cors(res);
-  try { const r = await runReview(); res.status(r.status).send(r.body); }
-  catch (e) { console.error(e); res.status(500).send("review failed: " + e.message); }
-};
-app.options(REVIEW_PATH, (_req, res) => { cors(res); res.status(204).end(); });
-app.post(REVIEW_PATH, reviewHandler);
-app.get(REVIEW_PATH, reviewHandler);
-
-// On-demand "answer open questions" pass — driven by the desk's Q&A panel.
-const ANSWER_PATH = "/answer/" + REVIEW_SECRET;
-const answerHandler = async (_req, res) => {
-  cors(res);
-  try { const r = await runAnswerPass(); res.status(r.status).send(r.body); }
-  catch (e) { console.error(e); res.status(500).send("answer pass failed: " + e.message); }
-};
-app.options(ANSWER_PATH, (_req, res) => { cors(res); res.status(204).end(); });
-app.post(ANSWER_PATH, answerHandler);
-app.get(ANSWER_PATH, answerHandler);
-
-const assistCors = res => {
-  res.set("Access-Control-Allow-Origin", "https://rckdo.github.io");
-  res.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "content-type, authorization");
-};
-app.options(ASSIST_PATH, (_req, res) => { assistCors(res); res.status(204).end(); });
-app.post(ASSIST_PATH, async (req, res) => {
-  assistCors(res);
-  try {
-    if (!(await verifyRichard(req))) { res.status(401).send("Not authorised."); return; }
-    const r = await runAssist(req.body?.function, req.body?.input);
-    res.status(r.status).send(r.body);
-  } catch (e) { console.error(e); res.status(500).send("assist failed: " + e.message); }
-});
-
 app.get("/", (_req, res) => res.send("walk-reference MCP: ok"));
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log("walk-reference MCP + reviewer listening on " + port));
+app.listen(port, () => console.log("postitpa board server v117 listening on " + port));
