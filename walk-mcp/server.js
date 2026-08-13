@@ -1,12 +1,36 @@
 /*
   POSTITPA — BOARD SERVER
-  v117.0 — 06/08/2026
+  v118.0 — 13/08/2026
   (Supersedes every earlier server file in this build — deploy this one.)
 
   This server reads and writes the board. It does not think. There is no
   model call in this file and no API key on the service.
 
   Changelog:
+  v118.0 — Second document: the strategic observations page (/strategyReference).
+           Three tools alongside the board's three — get_strategy,
+           update_strategy, patch_strategy — on the SAME MCP server, so the
+           connector Richard already has serves both without new plumbing.
+
+           It is a separate node, not a corner of the board, because the two
+           documents have opposite clocks. The board turns over daily and its
+           job is to be current. This one accumulates for years and its job is
+           to hold a pattern still — an observation written in August must
+           survive every compile between now and the day it stops being true.
+           Mixing them would let the daily rewrite eat the durable record.
+
+           Two tiers, and the split is the whole design. Tier 1 observations
+           are settled structural truths, each with a dated evidence table
+           under it. Tier 2 is a scratch pad that anything can be thrown at
+           mid-conversation. appendScratch is cheap and constant; `ingest`
+           (evidence onto an observation + drop the pad item, atomically) is
+           deliberate and happens only on an explicit go-ahead. Keeping
+           capture and committing apart is what stops the page silting up.
+
+           Evidence and solutions can be REMOVED — unlike the board's notes,
+           which are append-only. That asymmetry is deliberate too: the ingest
+           step is also an editing step, and a page nobody prunes becomes a
+           wall of text nobody reads.
   v117.0 — The server stops thinking. Deleted /review (the scheduled watcher),
            /answer (the Q&A pass), /assist (the email composer), the
            ANTHROPIC_API_KEY they ran on, the /apiUsage spend tally and
@@ -156,6 +180,12 @@ const PATH = "/mcp/" + SECRET;
 const NODE = "walkReference";
 const HISTORY = "walkReferenceHistory";
 
+// The strategic observations page. Separate node, separate clock — see the
+// v118.0 changelog for why it is not a corner of the board.
+const SNODE = "strategyReference";
+const SHISTORY = "strategyReferenceHistory";
+const SOPS = "strategyReferenceOps";
+
 // There is no API key here, and there must never be one again. This server
 // reads and writes the board; it does not think. Every judgement call is made
 // by Claude in a client Richard is actually talking to, on the subscription.
@@ -304,7 +334,7 @@ const archiveDelta = (board, operations, applied) =>
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "117.0" });
+  const server = new McpServer({ name: "walk-reference", version: "118.0" });
 
   server.tool(
     "get_reference",
@@ -810,6 +840,373 @@ function buildServer() {
     }
   );
 
+  /* ==================== Strategic observations (tier 1 + 2) ====================
+     A second, much simpler document on the same server. Shape:
+
+       observations[] { id, letter, title, text, state: live|retired, opened,
+                        evidence[] { id, date, text, confirm },
+                        solutions[] { id, text, brief } }
+       scratch[]      { id, ts, text, anchor }
+       questions[]    { id, text, state: open|answered, answer, answeredTs }
+       meta           { lastUpdated, updatedBy }
+
+     `date` on evidence is a free-text string on purpose. Half of what belongs
+     here is "Ongoing" or "c. 2024-25" — forcing it into an ISO date would mean
+     inventing precision the evidence does not have. `confirm: true` marks a
+     date Richard still has to verify, and the page renders it as such. */
+
+  const nextStratId = (list, prefix) => {
+    let max = 0;
+    asArray(list).forEach(x => {
+      const m = new RegExp("^" + prefix + "(\\d+)$").exec(String(x?.id || ""));
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    });
+    return prefix + (max + 1);
+  };
+
+  // A, B, C ... then 27+ falls back to a number rather than inventing AA.
+  const nextLetter = obs => {
+    const used = new Set(asArray(obs).map(o => String(o?.letter || "")));
+    for (let i = 0; i < 26; i++) {
+      const c = String.fromCharCode(65 + i);
+      if (!used.has(c)) return c;
+    }
+    return String(asArray(obs).length + 1);
+  };
+
+  const findObservation = (doc, id) =>
+    asArray(doc.observations).find(o => String(o?.id) === String(id)) || null;
+
+  // The observation owning a given evidence/solution id, so a removal op only
+  // needs the child id — the caller shouldn't have to know the parent.
+  const findOwner = (doc, key, childId) => {
+    for (const o of asArray(doc.observations)) {
+      if (asArray(o[key]).some(c => String(c?.id) === String(childId))) return o;
+    }
+    return null;
+  };
+
+  const stratTouchedBefore = (doc, operations) => {
+    const ids = new Set();
+    operations.forEach(o => ["observationId", "evidenceId", "solutionId", "scratchId", "questionId"]
+      .forEach(k => { if (o && o[k]) ids.add(String(o[k])); }));
+    const before = {};
+    asArray(doc.observations).forEach(o => {
+      if (ids.has(String(o?.id))) before[o.id] = o;
+      asArray(o?.evidence).forEach(e => { if (ids.has(String(e?.id))) before[e.id] = e; });
+      asArray(o?.solutions).forEach(s => { if (ids.has(String(s?.id))) before[s.id] = s; });
+    });
+    asArray(doc.scratch).forEach(s => { if (ids.has(String(s?.id))) before[s.id] = s; });
+    asArray(doc.questions).forEach(q => { if (ids.has(String(q?.id))) before[q.id] = q; });
+    // clearScratch drops the lot, so the pad's prior contents ARE the delta.
+    if (operations.some(o => o && o.op === "clearScratch")) before._scratch = doc.scratch || null;
+    return before;
+  };
+
+  server.tool(
+    "get_strategy",
+    "Read the strategic observations page — the durable record of how the organisation actually works. This is a documentation of PROBLEMS, not a to-do list, and it is a different document from the Morning Walk board (that is get_reference). Two tiers: observations[] are settled structural truths, each kept GENERAL (it should stay true after the incident that prompted it has faded) and each carrying an evidence[] table of dated specifics plus any labelled solutions[]; scratch[] is the uncommitted pad of loose items not yet folded in. Also questions[] (open questions in prose). Call at the START of every Strategy session and present the current state before discussing anything.",
+    {},
+    async () => {
+      const snap = await db.ref(SNODE).get();
+      if (!snap.exists()) return { content: [{ type: "text", text:
+        "EMPTY: /strategyReference does not exist yet. Seed it by reading strategy/seed.json from the morning-walks repo and passing it to update_strategy." }] };
+      return { content: [{ type: "text", text: JSON.stringify(snap.val(), null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "update_strategy",
+    "Write the COMPLETE new state of the strategic observations page — use for the initial seed and for a genuine restructure (merging two observations, rewriting a diagnosis, a pruning pass). NOT for ordinary capture: appendScratch and the ingest ops on patch_strategy cover everything a normal session does. Pass the entire document as a JSON string; it replaces the node wholesale, the previous state is archived, and meta.lastUpdated/updatedBy are stamped by the server. Must contain 'observations'. Ids and letters are assigned where missing. OPTIONAL CONFLICT GUARD: pass expectedLastUpdated (the meta.lastUpdated you saw when you read it); if the live document has moved since, the write is refused so you re-read rather than clobber.",
+    {
+      strategyJson: z.string().describe("Full strategy document as a JSON string"),
+      expectedLastUpdated: z.string().optional().describe("The meta.lastUpdated you read; write is refused if the live document has moved past it")
+    },
+    async ({ strategyJson, expectedLastUpdated }) => {
+      let next;
+      try { next = JSON.parse(strategyJson); }
+      catch (e) { return { content: [{ type: "text", text: "ERROR: invalid JSON — " + e.message }] }; }
+      if (!next || typeof next !== "object" || !next.observations)
+        return { content: [{ type: "text", text: "ERROR: refused — payload must contain 'observations'. Node unchanged." }] };
+
+      const current = await db.ref(SNODE).get();
+      if (expectedLastUpdated && current.exists()) {
+        const liveStamp = current.val()?.meta?.lastUpdated || "";
+        if (liveStamp && liveStamp !== expectedLastUpdated) {
+          return { content: [{ type: "text", text:
+            "CONFLICT: the page moved since you read it (live meta.lastUpdated=" + liveStamp +
+            ", you expected " + expectedLastUpdated + "). Nothing written — re-read with get_strategy and re-apply." }] };
+        }
+      }
+      if (current.exists()) await remember(SHISTORY, archiveKey(), current.val(), HISTORY_KEEP)
+        .catch(e => console.error("strategy archiveFull failed", e));
+
+      // Backfill ids/letters so a hand-written seed doesn't have to carry them.
+      // EVERY list gets ids, not just observations: a question or a scratch item
+      // written without one is invisible to answerQuestion / ingest afterwards,
+      // which is how a seeded page ends up with items nothing can address.
+      next.observations = asArray(next.observations);
+      next.observations.forEach((o, i) => {
+        if (!o.id) o.id = "o" + (i + 1);
+        if (!o.letter) o.letter = nextLetter(next.observations.slice(0, i));
+        if (!o.state) o.state = "live";
+        asArray(o.evidence).forEach((e, j) => { if (!e.id) e.id = o.id + "e" + (j + 1); });
+        asArray(o.solutions).forEach((s, j) => { if (!s.id) s.id = o.id + "s" + (j + 1); });
+      });
+      next.scratch = asArray(next.scratch);
+      next.scratch.forEach((s, i) => { if (!s.id) s.id = "x" + (i + 1); if (!s.ts) s.ts = new Date().toISOString(); });
+      next.questions = asArray(next.questions);
+      next.questions.forEach((q, i) => { if (!q.id) q.id = "q" + (i + 1); if (!q.state) q.state = "open"; });
+
+      next.meta = next.meta || {};
+      next.meta.lastUpdated = new Date().toISOString();
+      next.meta.updatedBy = "claude";
+      await db.ref(SNODE).set(next);
+      return { content: [{ type: "text", text:
+        "OK: strategy page updated at " + next.meta.lastUpdated + " — " + next.observations.length +
+        " observation(s) (previous state archived)." }] };
+    }
+  );
+
+  server.tool(
+    "patch_strategy",
+    "Apply SMALL, SURGICAL edits to the strategic observations page. Concurrency-safe: reads the page fresh, applies your ops to live state, writes back. Ops are applied in order.\n" +
+    "THE RITUAL — capture is constant, committing is deliberate. Keep them apart:\n" +
+    "  { op:'appendScratch', text:'...', anchor:'<short tag>' }  — throw a loose item on the pad. Cheap, low-ceremony, do this freely all session. Server assigns id + ts. NEVER needs permission.\n" +
+    "  { op:'ingest', scratchId:'x3', observationId:'o2', date:'w/c 10/08/2026', text:'...', confirm:true }  — fold ONE pad item up into an observation as dated evidence and drop it from the pad, atomically. ONLY on Richard's explicit go-ahead. text defaults to the scratch item's own text; date defaults to 'Ongoing'.\n" +
+    "  { op:'clearScratch' }  — empty the pad once everything on it has been ingested or judged not worth keeping.\n" +
+    "TIER 1 — observations stay GENERAL; specific incidents are evidence, never observations:\n" +
+    "  { op:'addObservation', title:'...', text:'...' }  — promote a genuinely distinct new structural truth (server assigns id + next letter). Use sparingly: prefer new evidence under an existing observation.\n" +
+    "  { op:'setObservation', observationId:'o2', title:'...', text:'...' }  — sharpen the diagnosis. Both fields optional.\n" +
+    "  { op:'setObservationState', observationId:'o2', state:'retired' }  — live | retired. Retired observations stay on the page for the record, below the live ones. Nothing is deleted.\n" +
+    "  { op:'addEvidence', observationId:'o2', date:'13/08/2026', text:'...', confirm:false }  — date is free text ('Ongoing', 'c. 2024-25', 'w/c 10/08/2026'); confirm:true flags a date Richard still has to verify.\n" +
+    "  { op:'setEvidence', evidenceId:'o2e1', date:'...', text:'...', confirm:false }  — used mostly to clear a [confirm] flag once a date is verified.\n" +
+    "  { op:'removeEvidence', evidenceId:'o2e1' }  — pruning is expected. The ingest step is also an editing step; a page that only ever grows stops being read.\n" +
+    "PROPOSED SOLUTIONS — labelled, never mixed into the diagnosis:\n" +
+    "  { op:'addSolution', observationId:'o3', text:'...', brief:'separate build brief' }  — a fix attached to its observation. brief optional: name the separate document if it graduates into a real build.\n" +
+    "  { op:'removeSolution', solutionId:'o3s1' }\n" +
+    "OPEN QUESTIONS — prose, not a table:\n" +
+    "  { op:'addQuestion', text:'...' }\n" +
+    "  { op:'answerQuestion', questionId:'q1', text:'...' }  — writes the answer and marks it answered\n" +
+    "  { op:'removeQuestion', questionId:'q1' }\n" +
+    "WHAT DOES NOT BELONG HERE: emails, tasks and tactical moves are actions — they go on the Morning Walk board via patch_reference, not here. Positives may be logged, but only genuine ones: firefighting caused by poor planning upstream is evidence for the reactive-culture observation, not a win.",
+    {
+      ops: z.string().describe("JSON array of operation objects, applied in order (see tool description for shapes)"),
+      expectedLastUpdated: z.string().optional().describe("Optional: the meta.lastUpdated you last saw; the patch still applies safely to live state, but the response flags that the page had moved")
+    },
+    async ({ ops, expectedLastUpdated }) => {
+      let operations;
+      try { operations = JSON.parse(ops); }
+      catch (e) { return { content: [{ type: "text", text: "ERROR: invalid ops JSON — " + e.message }] }; }
+      if (!Array.isArray(operations) || !operations.length)
+        return { content: [{ type: "text", text: "ERROR: ops must be a non-empty JSON array." }] };
+
+      const snap = await db.ref(SNODE).get();
+      if (!snap.exists()) return { content: [{ type: "text", text:
+        "ERROR: /strategyReference is empty — seed it with update_strategy (from strategy/seed.json) before patching." }] };
+      const doc = snap.val();
+      const priorStamp = doc?.meta?.lastUpdated || "";
+      const now = new Date().toISOString();
+      doc.observations = asArray(doc.observations);
+      doc.scratch = asArray(doc.scratch);
+      doc.questions = asArray(doc.questions);
+
+      const applied = [], errors = [];
+
+      operations.forEach((o, i) => {
+        try {
+          switch (o && o.op) {
+
+            case "appendScratch": {
+              if (!o.text) { errors.push("op " + i + ": appendScratch needs text"); break; }
+              const item = { id: nextStratId(doc.scratch, "x"), ts: now, text: String(o.text) };
+              if (o.anchor) item.anchor = String(o.anchor);
+              doc.scratch.push(item);
+              applied.push("scratch+ " + item.id);
+              break;
+            }
+
+            case "ingest": {
+              // The commit step. Deliberately atomic: evidence lands and the pad
+              // item disappears in one write, so a half-ingested pad is impossible.
+              if (!o.scratchId || !o.observationId) { errors.push("op " + i + ": ingest needs scratchId and observationId"); break; }
+              const item = doc.scratch.find(s => String(s?.id) === String(o.scratchId));
+              if (!item) { errors.push("op " + i + ": scratch item " + o.scratchId + " not found"); break; }
+              const obs = findObservation(doc, o.observationId);
+              if (!obs) { errors.push("op " + i + ": observation " + o.observationId + " not found"); break; }
+              obs.evidence = asArray(obs.evidence);
+              const ev = {
+                id: nextStratId(obs.evidence, obs.id + "e"),
+                date: String(o.date || "Ongoing"),
+                text: String(o.text || item.text)
+              };
+              if (o.confirm) ev.confirm = true;
+              obs.evidence.push(ev);
+              doc.scratch = doc.scratch.filter(s => String(s?.id) !== String(o.scratchId));
+              applied.push("ingest " + o.scratchId + " -> " + obs.id + " (" + ev.id + ")");
+              break;
+            }
+
+            case "clearScratch": {
+              const n = doc.scratch.length;
+              doc.scratch = [];
+              applied.push("scratch cleared (" + n + " item(s))");
+              break;
+            }
+
+            case "addObservation": {
+              if (!o.title || !o.text) { errors.push("op " + i + ": addObservation needs title and text"); break; }
+              const obs = {
+                id: nextStratId(doc.observations, "o"),
+                letter: nextLetter(doc.observations),
+                title: String(o.title),
+                text: String(o.text),
+                state: "live",
+                opened: now,
+                evidence: [],
+                solutions: []
+              };
+              doc.observations.push(obs);
+              applied.push("observation+ " + obs.letter + " (" + obs.id + ")");
+              break;
+            }
+
+            case "setObservation": {
+              const obs = findObservation(doc, o.observationId);
+              if (!obs) { errors.push("op " + i + ": observation " + o.observationId + " not found"); break; }
+              if (o.title) obs.title = String(o.title);
+              if (o.text) obs.text = String(o.text);
+              if (!o.title && !o.text) { errors.push("op " + i + ": setObservation needs title or text"); break; }
+              applied.push("observation~ " + obs.id);
+              break;
+            }
+
+            case "setObservationState": {
+              const obs = findObservation(doc, o.observationId);
+              if (!obs) { errors.push("op " + i + ": observation " + o.observationId + " not found"); break; }
+              if (!["live", "retired"].includes(o.state)) { errors.push("op " + i + ": state must be live or retired"); break; }
+              obs.state = o.state;
+              applied.push("observation " + obs.id + " -> " + o.state);
+              break;
+            }
+
+            case "addEvidence": {
+              const obs = findObservation(doc, o.observationId);
+              if (!obs) { errors.push("op " + i + ": observation " + o.observationId + " not found"); break; }
+              if (!o.text) { errors.push("op " + i + ": addEvidence needs text"); break; }
+              obs.evidence = asArray(obs.evidence);
+              const ev = {
+                id: nextStratId(obs.evidence, obs.id + "e"),
+                date: String(o.date || "Ongoing"),
+                text: String(o.text)
+              };
+              if (o.confirm) ev.confirm = true;
+              obs.evidence.push(ev);
+              applied.push("evidence+ " + ev.id);
+              break;
+            }
+
+            case "setEvidence": {
+              const obs = findOwner(doc, "evidence", o.evidenceId);
+              if (!obs) { errors.push("op " + i + ": evidence " + o.evidenceId + " not found"); break; }
+              const ev = asArray(obs.evidence).find(e => String(e.id) === String(o.evidenceId));
+              if (o.date) ev.date = String(o.date);
+              if (o.text) ev.text = String(o.text);
+              // confirm is a flag being cleared as often as set, so an explicit
+              // false must actually remove it — hence the undefined check.
+              if (o.confirm !== undefined) { if (o.confirm) ev.confirm = true; else delete ev.confirm; }
+              applied.push("evidence~ " + ev.id);
+              break;
+            }
+
+            case "removeEvidence": {
+              const obs = findOwner(doc, "evidence", o.evidenceId);
+              if (!obs) { errors.push("op " + i + ": evidence " + o.evidenceId + " not found"); break; }
+              obs.evidence = asArray(obs.evidence).filter(e => String(e.id) !== String(o.evidenceId));
+              applied.push("evidence- " + o.evidenceId);
+              break;
+            }
+
+            case "addSolution": {
+              const obs = findObservation(doc, o.observationId);
+              if (!obs) { errors.push("op " + i + ": observation " + o.observationId + " not found"); break; }
+              if (!o.text) { errors.push("op " + i + ": addSolution needs text"); break; }
+              obs.solutions = asArray(obs.solutions);
+              const sol = { id: nextStratId(obs.solutions, obs.id + "s"), text: String(o.text) };
+              if (o.brief) sol.brief = String(o.brief);
+              obs.solutions.push(sol);
+              applied.push("solution+ " + sol.id);
+              break;
+            }
+
+            case "removeSolution": {
+              const obs = findOwner(doc, "solutions", o.solutionId);
+              if (!obs) { errors.push("op " + i + ": solution " + o.solutionId + " not found"); break; }
+              obs.solutions = asArray(obs.solutions).filter(s => String(s.id) !== String(o.solutionId));
+              applied.push("solution- " + o.solutionId);
+              break;
+            }
+
+            case "addQuestion": {
+              if (!o.text) { errors.push("op " + i + ": addQuestion needs text"); break; }
+              const q = { id: nextStratId(doc.questions, "q"), text: String(o.text), state: "open" };
+              doc.questions.push(q);
+              applied.push("question+ " + q.id);
+              break;
+            }
+
+            case "answerQuestion": {
+              const q = doc.questions.find(x => String(x?.id) === String(o.questionId));
+              if (!q) { errors.push("op " + i + ": question " + o.questionId + " not found"); break; }
+              if (!o.text) { errors.push("op " + i + ": answerQuestion needs text"); break; }
+              q.answer = String(o.text);
+              q.state = "answered";
+              q.answeredTs = now;
+              applied.push("question~ " + q.id);
+              break;
+            }
+
+            case "removeQuestion": {
+              const before = doc.questions.length;
+              doc.questions = doc.questions.filter(x => String(x?.id) !== String(o.questionId));
+              if (doc.questions.length === before) { errors.push("op " + i + ": question " + o.questionId + " not found"); break; }
+              applied.push("question- " + o.questionId);
+              break;
+            }
+
+            default:
+              errors.push("op " + i + ": unknown op '" + (o && o.op) + "'");
+          }
+        } catch (e) {
+          errors.push("op " + i + ": " + e.message);
+        }
+      });
+
+      if (!applied.length)
+        return { content: [{ type: "text", text: "ERROR: no operations applied. " + errors.join("; ") }] };
+
+      await remember(SOPS, archiveKey(), {
+        ts: now,
+        priorStamp,
+        applied: applied.slice(0, 40),
+        ops: operations.slice(0, 40),
+        before: stratTouchedBefore(snap.val(), operations)
+      }, OPS_KEEP).catch(e => console.error("strategy archiveDelta failed", e));
+
+      doc.meta = doc.meta || {};
+      doc.meta.lastUpdated = now;
+      doc.meta.updatedBy = "claude";
+      await db.ref(SNODE).set(doc);
+
+      const moved = expectedLastUpdated && priorStamp && priorStamp !== expectedLastUpdated;
+      return { content: [{ type: "text", text:
+        "OK: strategy patched at " + now + " — " + applied.join(", ") +
+        (errors.length ? " | SKIPPED: " + errors.join("; ") : "") +
+        (moved ? " | NOTE: the page had moved since you last read it (was " + expectedLastUpdated + ", found " + priorStamp + ") — your patch applied safely to live state." : "") +
+        " (previous state archived)." }] };
+    }
+  );
+
   return server;
 }
 
@@ -835,4 +1232,4 @@ app.get(PATH, (_req, res) => res.status(405).send("POST only"));
 app.get("/", (_req, res) => res.send("walk-reference MCP: ok"));
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log("postitpa board server v117 listening on " + port));
+app.listen(port, () => console.log("postitpa board server v118 listening on " + port));
