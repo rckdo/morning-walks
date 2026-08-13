@@ -1,12 +1,34 @@
 /*
   POSTITPA — BOARD SERVER
-  v118.0 — 13/08/2026
+  v119.0 — 13/08/2026
   (Supersedes every earlier server file in this build — deploy this one.)
 
   This server reads and writes the board. It does not think. There is no
   model call in this file and no API key on the service.
 
   Changelog:
+  v119.0 — The strategy record gains a third settled section and two evidence
+           qualifiers, all from one addendum that would not fit v118's shape.
+
+           analysis[] — a working explanation of WHY a pattern persists is
+           neither an observation nor evidence. The page's one rule is that
+           everything has exactly one right place; filing reasoning as an
+           observation makes it look like a finding, and filing it as evidence
+           dates something that has no date. So it gets its own section, and
+           it deliberately takes no evidence table.
+
+           quote:true on evidence — some evidence is strongest as the exact
+           words someone wrote down at the time (a risk register entry, a
+           written policy). Paraphrasing it loses the point, so the flag marks
+           it verbatim and the page sets it as a quotation.
+
+           foundational:true on an observation — marks substrate the others are
+           downstream of, rather than a peer. Rare by definition: if everything
+           is foundational, nothing is.
+
+           Observation text may now contain blank lines, rendered as paragraphs.
+           A substrate observation has to explain what it is upstream of, and
+           that does not fit in one paragraph.
   v118.0 — Second document: the strategic observations page (/strategyReference).
            Three tools alongside the board's three — get_strategy,
            update_strategy, patch_strategy — on the SAME MCP server, so the
@@ -334,7 +356,7 @@ const archiveDelta = (board, operations, applied) =>
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "118.0" });
+  const server = new McpServer({ name: "walk-reference", version: "119.0" });
 
   server.tool(
     "get_reference",
@@ -844,8 +866,10 @@ function buildServer() {
      A second, much simpler document on the same server. Shape:
 
        observations[] { id, letter, title, text, state: live|retired, opened,
-                        evidence[] { id, date, text, confirm },
+                        foundational,
+                        evidence[] { id, date, text, confirm, quote },
                         solutions[] { id, text, brief } }
+       analysis[]     { id, title, points[], consequence }
        scratch[]      { id, ts, text, anchor }
        questions[]    { id, text, state: open|answered, answer, answeredTs }
        meta           { lastUpdated, updatedBy }
@@ -853,7 +877,21 @@ function buildServer() {
      `date` on evidence is a free-text string on purpose. Half of what belongs
      here is "Ongoing" or "c. 2024-25" — forcing it into an ISO date would mean
      inventing precision the evidence does not have. `confirm: true` marks a
-     date Richard still has to verify, and the page renders it as such. */
+     date Richard still has to verify, and the page renders it as such.
+
+     `quote: true` marks evidence reproduced verbatim from a source document
+     rather than described. Some evidence is strongest as the exact words that
+     were written down at the time, and paraphrasing it loses the point.
+
+     `analysis[]` exists because a working explanation is neither an observation
+     nor evidence, and the page's one rule is that everything has exactly one
+     right place. An observation says what is true; analysis says why it persists
+     and takes no dated evidence. Forcing the second into the first would make
+     reasoning look like a finding.
+
+     `foundational: true` marks an observation the others are downstream of —
+     substrate rather than a peer. Rare by definition: if everything is
+     foundational, nothing is. */
 
   const nextStratId = (list, prefix) => {
     let max = 0;
@@ -888,7 +926,7 @@ function buildServer() {
 
   const stratTouchedBefore = (doc, operations) => {
     const ids = new Set();
-    operations.forEach(o => ["observationId", "evidenceId", "solutionId", "scratchId", "questionId"]
+    operations.forEach(o => ["observationId", "evidenceId", "solutionId", "scratchId", "questionId", "analysisId"]
       .forEach(k => { if (o && o[k]) ids.add(String(o[k])); }));
     const before = {};
     asArray(doc.observations).forEach(o => {
@@ -896,6 +934,7 @@ function buildServer() {
       asArray(o?.evidence).forEach(e => { if (ids.has(String(e?.id))) before[e.id] = e; });
       asArray(o?.solutions).forEach(s => { if (ids.has(String(s?.id))) before[s.id] = s; });
     });
+    asArray(doc.analysis).forEach(a => { if (ids.has(String(a?.id))) before[a.id] = a; });
     asArray(doc.scratch).forEach(s => { if (ids.has(String(s?.id))) before[s.id] = s; });
     asArray(doc.questions).forEach(q => { if (ids.has(String(q?.id))) before[q.id] = q; });
     // clearScratch drops the lot, so the pad's prior contents ARE the delta.
@@ -905,7 +944,7 @@ function buildServer() {
 
   server.tool(
     "get_strategy",
-    "Read the strategic observations page — the durable record of how the organisation actually works. This is a documentation of PROBLEMS, not a to-do list, and it is a different document from the Morning Walk board (that is get_reference). Two tiers: observations[] are settled structural truths, each kept GENERAL (it should stay true after the incident that prompted it has faded) and each carrying an evidence[] table of dated specifics plus any labelled solutions[]; scratch[] is the uncommitted pad of loose items not yet folded in. Also questions[] (open questions in prose). Call at the START of every Strategy session and present the current state before discussing anything.",
+    "Read the strategic observations page — the durable record of how the organisation actually works. This is a documentation of PROBLEMS, not a to-do list, and it is a different document from the Morning Walk board (that is get_reference). Two tiers: observations[] are settled structural truths, each kept GENERAL (it should stay true after the incident that prompted it has faded) and each carrying an evidence[] table of dated specifics plus any labelled solutions[]; scratch[] is the uncommitted pad of loose items not yet folded in. Also analysis[] (working explanations of WHY the pattern persists — reasoning, not findings, and they take no evidence) and questions[] (open questions in prose). An observation flagged foundational:true is substrate the others are downstream of. Call at the START of every Strategy session and present the current state before discussing anything.",
     {},
     async () => {
       const snap = await db.ref(SNODE).get();
@@ -953,6 +992,8 @@ function buildServer() {
         asArray(o.evidence).forEach((e, j) => { if (!e.id) e.id = o.id + "e" + (j + 1); });
         asArray(o.solutions).forEach((s, j) => { if (!s.id) s.id = o.id + "s" + (j + 1); });
       });
+      next.analysis = asArray(next.analysis);
+      next.analysis.forEach((a, i) => { if (!a.id) a.id = "an" + (i + 1); });
       next.scratch = asArray(next.scratch);
       next.scratch.forEach((s, i) => { if (!s.id) s.id = "x" + (i + 1); if (!s.ts) s.ts = new Date().toISOString(); });
       next.questions = asArray(next.questions);
@@ -976,15 +1017,19 @@ function buildServer() {
     "  { op:'ingest', scratchId:'x3', observationId:'o2', date:'w/c 10/08/2026', text:'...', confirm:true }  — fold ONE pad item up into an observation as dated evidence and drop it from the pad, atomically. ONLY on Richard's explicit go-ahead. text defaults to the scratch item's own text; date defaults to 'Ongoing'.\n" +
     "  { op:'clearScratch' }  — empty the pad once everything on it has been ingested or judged not worth keeping.\n" +
     "TIER 1 — observations stay GENERAL; specific incidents are evidence, never observations:\n" +
-    "  { op:'addObservation', title:'...', text:'...' }  — promote a genuinely distinct new structural truth (server assigns id + next letter). Use sparingly: prefer new evidence under an existing observation.\n" +
-    "  { op:'setObservation', observationId:'o2', title:'...', text:'...' }  — sharpen the diagnosis. Both fields optional.\n" +
+    "  { op:'addObservation', title:'...', text:'...', foundational:true }  — promote a genuinely distinct new structural truth (server assigns id + next letter). Use sparingly: prefer new evidence under an existing observation. foundational:true marks substrate the other observations are downstream of — rare by definition, because if everything is foundational nothing is. text may contain blank lines; the page renders them as paragraphs.\n" +
+    "  { op:'setObservation', observationId:'o2', title:'...', text:'...', foundational:false }  — sharpen the diagnosis. All fields optional.\n" +
     "  { op:'setObservationState', observationId:'o2', state:'retired' }  — live | retired. Retired observations stay on the page for the record, below the live ones. Nothing is deleted.\n" +
-    "  { op:'addEvidence', observationId:'o2', date:'13/08/2026', text:'...', confirm:false }  — date is free text ('Ongoing', 'c. 2024-25', 'w/c 10/08/2026'); confirm:true flags a date Richard still has to verify.\n" +
-    "  { op:'setEvidence', evidenceId:'o2e1', date:'...', text:'...', confirm:false }  — used mostly to clear a [confirm] flag once a date is verified.\n" +
+    "  { op:'addEvidence', observationId:'o2', date:'13/08/2026', text:'...', confirm:false, quote:false }  — date is free text ('Ongoing', 'c. 2024-25', 'w/c 10/08/2026'); confirm:true flags a date Richard still has to verify; quote:true marks text reproduced VERBATIM from a source document (a risk register entry, a written policy) rather than described, and the page sets it as a quotation. Never paraphrase something marked quote — the exact wording is the evidence.\n" +
+    "  { op:'setEvidence', evidenceId:'o2e1', date:'...', text:'...', confirm:false, quote:false }  — used mostly to clear a [confirm] flag once a date is verified.\n" +
     "  { op:'removeEvidence', evidenceId:'o2e1' }  — pruning is expected. The ingest step is also an editing step; a page that only ever grows stops being read.\n" +
     "PROPOSED SOLUTIONS — labelled, never mixed into the diagnosis:\n" +
     "  { op:'addSolution', observationId:'o3', text:'...', brief:'separate build brief' }  — a fix attached to its observation. brief optional: name the separate document if it graduates into a real build.\n" +
     "  { op:'removeSolution', solutionId:'o3s1' }\n" +
+    "ANALYSIS — why the pattern persists. Reasoning, NOT findings, and it takes no dated evidence:\n" +
+    "  { op:'addAnalysis', title:'Why systems are resisted', points:['...','...'], consequence:'...' }  — a working explanation sitting alongside the observations. Use when something explains WHY several observations hold rather than asserting a new one. consequence optional: what the reasoning means for how to act. Keep it general, like everything else here.\n" +
+    "  { op:'setAnalysis', analysisId:'an1', title:'...', points:[...], consequence:'...' }  — all fields optional\n" +
+    "  { op:'removeAnalysis', analysisId:'an1' }\n" +
     "OPEN QUESTIONS — prose, not a table:\n" +
     "  { op:'addQuestion', text:'...' }\n" +
     "  { op:'answerQuestion', questionId:'q1', text:'...' }  — writes the answer and marks it answered\n" +
@@ -1008,6 +1053,7 @@ function buildServer() {
       const priorStamp = doc?.meta?.lastUpdated || "";
       const now = new Date().toISOString();
       doc.observations = asArray(doc.observations);
+      doc.analysis = asArray(doc.analysis);
       doc.scratch = asArray(doc.scratch);
       doc.questions = asArray(doc.questions);
 
@@ -1066,6 +1112,7 @@ function buildServer() {
                 evidence: [],
                 solutions: []
               };
+              if (o.foundational) obs.foundational = true;
               doc.observations.push(obs);
               applied.push("observation+ " + obs.letter + " (" + obs.id + ")");
               break;
@@ -1076,7 +1123,10 @@ function buildServer() {
               if (!obs) { errors.push("op " + i + ": observation " + o.observationId + " not found"); break; }
               if (o.title) obs.title = String(o.title);
               if (o.text) obs.text = String(o.text);
-              if (!o.title && !o.text) { errors.push("op " + i + ": setObservation needs title or text"); break; }
+              if (o.foundational !== undefined) { if (o.foundational) obs.foundational = true; else delete obs.foundational; }
+              if (!o.title && !o.text && o.foundational === undefined) {
+                errors.push("op " + i + ": setObservation needs title, text or foundational"); break;
+              }
               applied.push("observation~ " + obs.id);
               break;
             }
@@ -1101,6 +1151,7 @@ function buildServer() {
                 text: String(o.text)
               };
               if (o.confirm) ev.confirm = true;
+              if (o.quote) ev.quote = true;
               obs.evidence.push(ev);
               applied.push("evidence+ " + ev.id);
               break;
@@ -1115,6 +1166,7 @@ function buildServer() {
               // confirm is a flag being cleared as often as set, so an explicit
               // false must actually remove it — hence the undefined check.
               if (o.confirm !== undefined) { if (o.confirm) ev.confirm = true; else delete ev.confirm; }
+              if (o.quote !== undefined) { if (o.quote) ev.quote = true; else delete ev.quote; }
               applied.push("evidence~ " + ev.id);
               break;
             }
@@ -1144,6 +1196,41 @@ function buildServer() {
               if (!obs) { errors.push("op " + i + ": solution " + o.solutionId + " not found"); break; }
               obs.solutions = asArray(obs.solutions).filter(s => String(s.id) !== String(o.solutionId));
               applied.push("solution- " + o.solutionId);
+              break;
+            }
+
+            case "addAnalysis": {
+              if (!o.title || !Array.isArray(o.points) || !o.points.length) {
+                errors.push("op " + i + ": addAnalysis needs title and a non-empty points array"); break;
+              }
+              const an = {
+                id: nextStratId(doc.analysis, "an"),
+                title: String(o.title),
+                points: o.points.map(String)
+              };
+              if (o.consequence) an.consequence = String(o.consequence);
+              doc.analysis.push(an);
+              applied.push("analysis+ " + an.id);
+              break;
+            }
+
+            case "setAnalysis": {
+              const an = doc.analysis.find(x => String(x?.id) === String(o.analysisId));
+              if (!an) { errors.push("op " + i + ": analysis " + o.analysisId + " not found"); break; }
+              if (o.title) an.title = String(o.title);
+              if (Array.isArray(o.points) && o.points.length) an.points = o.points.map(String);
+              if (o.consequence !== undefined) {
+                if (o.consequence) an.consequence = String(o.consequence); else delete an.consequence;
+              }
+              applied.push("analysis~ " + an.id);
+              break;
+            }
+
+            case "removeAnalysis": {
+              const before = doc.analysis.length;
+              doc.analysis = doc.analysis.filter(x => String(x?.id) !== String(o.analysisId));
+              if (doc.analysis.length === before) { errors.push("op " + i + ": analysis " + o.analysisId + " not found"); break; }
+              applied.push("analysis- " + o.analysisId);
               break;
             }
 
@@ -1232,4 +1319,4 @@ app.get(PATH, (_req, res) => res.status(405).send("POST only"));
 app.get("/", (_req, res) => res.send("walk-reference MCP: ok"));
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log("postitpa board server v118 listening on " + port));
+app.listen(port, () => console.log("postitpa board server v119 listening on " + port));

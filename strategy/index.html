@@ -1,9 +1,23 @@
 <!DOCTYPE html>
 <!--
   STRATEGIC OBSERVATIONS
-  v1.1 — 13/08/2026
+  v1.2 — 13/08/2026
 
   Changelog:
+  v1.2 — Analysis, quotations, substrate. Three additions, all so that a thing
+         lands in exactly one place:
+         - An ANALYSIS section between the settled observations and the pad.
+           A working explanation of why a pattern persists is neither an
+           observation nor evidence; filed as an observation it reads as a
+           finding, filed as evidence it acquires a date it does not have. It
+           is numbered, and it carries no evidence table — the absence of that
+           table is what tells you which kind of thing you are reading.
+         - Evidence marked quote:true is set as a quotation. Some evidence is
+           strongest as the exact words written down at the time, and it has to
+           look different from a description of them.
+         - foundational:true puts a label beside an observation the others are
+           downstream of, and observation text now breaks on blank lines,
+           because substrate has to explain what it sits underneath.
   v1.1 — Dossier. v1.0 borrowed the desk's palette and fonts, which made this
          read as another page of the same product; it is not, and it should not
          look like one. Now: warm stock rather than the desk's cool grey, one
@@ -115,6 +129,27 @@
   .confirm{color:var(--oxblood);font-size:0.68rem;font-weight:600;font-style:normal;
     letter-spacing:0.1em;display:block;margin-top:3px}
 
+  /* Verbatim source material. Indented and italic so it is visibly somebody
+     else's words — the exact wording is the evidence, not a description of it. */
+  td.quote{font-style:italic;padding-left:16px;border-left:2px solid var(--rule);
+    margin-left:0}
+
+  /* Reasoning, not findings. Numbered, no table, no dates — the absence of an
+     evidence column is what tells you which kind of thing you are reading. */
+  .analysis-item{margin:34px 0 0;padding-bottom:30px;border-bottom:1px solid var(--hairline)}
+  .analysis-item:last-child{border-bottom:none}
+  .analysis-item h3{font-weight:600;font-size:1.05rem;line-height:1.35;margin-bottom:14px}
+  .analysis-item ol{margin:0;padding-left:1.4em}
+  .analysis-item li{margin-bottom:11px;max-width:56ch;padding-left:0.3em}
+  .analysis-item li::marker{color:var(--faint);font-size:0.85em}
+  .consequence{margin-top:18px;padding-left:20px;border-left:1px solid var(--rule);
+    font-style:italic;color:var(--faint);max-width:56ch}
+
+  /* Substrate, not a peer — the others are downstream of it. */
+  .foundational{display:inline-block;margin-left:10px;font-size:0.62rem;font-weight:600;
+    letter-spacing:0.13em;text-transform:uppercase;color:var(--faint);
+    border:1px solid var(--rule);padding:2px 7px;vertical-align:middle}
+
   /* Indented and ruled rather than boxed. A filled card would make the fix look
      like the finding, and the whole point is that they stay apart. */
   .solutions{margin-top:24px;padding:2px 0 2px 20px;border-left:1px solid var(--rule)}
@@ -188,6 +223,7 @@
       conversation; this page only reads.</p>
   </header>
   <div id="tier1"></div>
+  <div id="analysis"></div>
   <div id="tier2"></div>
   <div id="tier3"></div>
   <footer id="foot"></footer>
@@ -244,12 +280,20 @@
       { day:"2-digit", month:"2-digit" });
   };
 
+  // Blank lines become paragraphs. A substrate observation has to explain what
+  // it sits underneath, and that does not fit in one paragraph.
+  const paras = (text, cls) => String(text ?? "").split(/\n\s*\n/)
+    .map(p => p.trim()).filter(Boolean)
+    .map(p => '<p class="' + cls + '">' + esc(p).replace(/\n/g, "<br>") + '</p>').join("");
+
   function evidenceTable(evidence) {
     if (!evidence.length) return '<p class="empty">No evidence logged yet.</p>';
     return '<table><thead><tr><th>Date</th><th>Evidence</th></tr></thead><tbody>' +
       evidence.map(e => '<tr><td class="date">' + esc(e.date || "Ongoing") +
         (e.confirm ? '<span class="confirm">[confirm]</span>' : '') +
-        '</td><td>' + esc(e.text) + '</td></tr>').join("") +
+        // Verbatim evidence is set as a quotation: the exact wording is the
+        // point, so it must be visibly distinct from a description of it.
+        '</td><td' + (e.quote ? ' class="quote"' : '') + '>' + esc(e.text) + '</td></tr>').join("") +
       '</tbody></table>';
   }
 
@@ -263,10 +307,20 @@
 
   function observationBlock(o) {
     return '<div class="obs' + (o.state === "retired" ? " retired" : "") + '">' +
-      '<h3><span class="letter">' + esc(o.letter || "?") + ' — </span>' + esc(o.title) + '</h3>' +
-      '<p class="diagnosis">' + esc(o.text) + '</p>' +
+      '<h3><span class="letter">' + esc(o.letter || "?") + ' — </span>' + esc(o.title) +
+      (o.foundational ? '<span class="foundational">Foundational</span>' : '') + '</h3>' +
+      paras(o.text, "diagnosis") +
       evidenceTable(asArray(o.evidence)) +
       solutionsBlock(asArray(o.solutions)) +
+      '</div>';
+  }
+
+  // Reasoning, not findings — so no evidence table, and never mixed in with the
+  // observations themselves.
+  function analysisBlock(a) {
+    return '<div class="analysis-item"><h3>' + esc(a.title) + '</h3><ol>' +
+      asArray(a.points).map(p => '<li>' + esc(p) + '</li>').join("") + '</ol>' +
+      (a.consequence ? '<p class="consequence">' + esc(a.consequence) + '</p>' : '') +
       '</div>';
   }
 
@@ -280,6 +334,7 @@
     // that stopped being true, it just stops leading with it.
     const live = observations.filter(o => o.state !== "retired");
     const retired = observations.filter(o => o.state === "retired");
+    const analysis = asArray(doc.analysis);
     const scratch = asArray(doc.scratch);
     const questions = asArray(doc.questions);
 
@@ -295,6 +350,15 @@
                    : '<p class="empty">Nothing settled yet.</p>') +
       (retired.length ? '<h2><span class="tier">Tier 1</span>Retired</h2>' +
         retired.map(observationBlock).join("") : "");
+
+    // Sits between the settled observations and the uncommitted pad, because it
+    // is settled thinking — but it is reasoning, so it stays out of Tier 1.
+    $("analysis").innerHTML = !analysis.length ? "" :
+      '<h2>Analysis</h2>' +
+      '<p class="tier-note">Why the pattern persists. Working explanations rather than' +
+      ' findings — nothing here carries evidence, and nothing here is a claim about a' +
+      ' particular event.</p>' +
+      analysis.map(analysisBlock).join("");
 
     $("tier2").innerHTML =
       '<h2><span class="tier">Tier 2</span>Scratch pad</h2>' +

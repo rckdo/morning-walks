@@ -20,6 +20,10 @@ It is a **different document from the board**. The board turns over daily and it
 
 **Tier 2 — the scratch pad.** Uncommitted. Loose items thrown down mid-conversation, not yet part of the record.
 
+**Analysis** sits alongside Tier 1 but is not part of it. A working explanation of *why* a pattern persists is neither an observation nor evidence — it takes no dates and carries no evidence table. Filed as an observation it reads as a finding; filed as evidence it acquires a precision it does not have. Use `addAnalysis`, and keep it as general as everything else.
+
+**Foundational observations.** `foundational: true` marks substrate the others are downstream of, rather than a peer. Rare by definition — if everything is foundational, nothing is. When one exists, say what it sits underneath in the observation's own text.
+
 ## The ritual — and it is the whole design
 
 **Capture is constant. Committing is deliberate. Keep the two acts apart.**
