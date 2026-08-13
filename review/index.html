@@ -4,6 +4,14 @@
   v2.0 — 13/08/2026
 
   Changelog:
+  v2.2 — Sticky bearings. Two additions, both about knowing where you are in
+         the middle of a long section on a phone:
+         - The crumb bar locks to the top of the screen, and once the section
+           heading has scrolled out of view the bar shows it (§N Title) in
+           place of the part label — the header stays with you.
+         - On a phone, a thin fixed bar at the foot carries previous/next, so
+           the way onward is visible without scrolling to the end. Desktop
+           keeps the foot nav and arrow keys; the bar is phone-only.
   v2.1 — Markdown tables. The renderer treated a pipe table as a paragraph
          and printed the bars. A block whose lines all start with | now
          renders as a table — header row honoured when a |---| separator
@@ -119,9 +127,13 @@
     border:1px dashed var(--rule);padding:2px 7px}
 
   /* ---- a section page ---- */
-  .crumb{display:flex;justify-content:space-between;gap:16px;
-    padding:26px 0 14px;border-bottom:1px solid var(--rule)}
-  .crumb a{text-decoration:none}
+  /* The crumb locks to the top; once the heading scrolls away it carries the
+     section's own label, so you always know what you are inside. */
+  .crumb{position:sticky;top:0;z-index:5;background:var(--paper);
+    display:flex;justify-content:space-between;gap:16px;align-items:baseline;
+    padding:16px 0 12px;border-bottom:1px solid var(--rule)}
+  .crumb a{text-decoration:none;flex-shrink:0}
+  .crumb .here{max-width:68%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .page h1{font-size:1.4rem;margin-top:26px}
   .page h1 .num{color:var(--faint);font-weight:400}
   .page-meta{margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;align-items:baseline}
@@ -165,6 +177,19 @@
   .pagenav a.next{margin-left:auto;text-align:right}
   .pagenav .dir{display:block;font-family:var(--sans);font-size:0.66rem;
     letter-spacing:0.12em;text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+
+  /* Phone-only: the way onward, fixed at the foot. */
+  .nextbar{display:none}
+  @media (max-width:520px){
+    .nextbar{position:fixed;left:0;right:0;bottom:0;z-index:5;
+      display:flex;justify-content:space-between;align-items:center;gap:14px;
+      padding:11px 18px;background:var(--paper);border-top:1px solid var(--rule);
+      font-family:var(--sans);font-size:0.82rem}
+    .nextbar a{text-decoration:none;color:var(--ink);white-space:nowrap;
+      overflow:hidden;text-overflow:ellipsis;max-width:72%}
+    .nextbar .nb-prev{color:var(--faint)}
+    .nextbar .nb-empty{width:1px}
+  }
 
   /* ---- threads / facts / spine pages ---- */
   .thread{padding:16px 0;border-bottom:1px solid var(--hairline)}
@@ -391,7 +416,7 @@
   const privateTag = '<span class="private-tag">Private</span>';
   const crumb = right =>
     '<div class="crumb"><a class="m" href="#">Contents</a>' +
-    (right ? '<span class="m">' + right + '</span>' : "") + '</div>';
+    (right ? '<span class="m here">' + right + '</span>' : "") + '</div>';
 
   /* ---------- routing ----------
      The hash is the page: '' contents, 'x-<id>' a section (or the section
@@ -511,7 +536,28 @@
       '<div class="pagenav">' +
       (i > 0 ? navLink(order[i - 1], "prev", "Previous") : "") +
       (i >= 0 && i < order.length - 1 ? navLink(order[i + 1], "next", "Next") : "") +
+      '</div>' +
+      // Phone-only fixed bar (CSS hides it wider): the way onward, always visible.
+      '<div class="nextbar">' +
+      (i > 0 ? '<a class="nb-prev" href="#x-' + esc(order[i - 1]) + '">&lsaquo; ' +
+        (numbering[order[i - 1]] !== undefined ? "§" + numbering[order[i - 1]]
+          : esc(secById[order[i - 1]].title)) + '</a>' : '<span class="nb-empty"></span>') +
+      (i >= 0 && i < order.length - 1 ? '<a class="nb-next" href="#x-' + esc(order[i + 1]) + '">' +
+        (numbering[order[i + 1]] !== undefined ? "§" + numbering[order[i + 1]] + " " : "") +
+        esc(secById[order[i + 1]].title) + ' &rsaquo;</a>' : "") +
       '</div></div>';
+
+    // Once the heading scrolls under the sticky crumb, the crumb carries the
+    // section's own label instead of the part's.
+    const h1 = document.querySelector(".page h1");
+    const here = document.querySelector(".crumb .here");
+    if (h1 && here && "IntersectionObserver" in window) {
+      const partLabel = here.textContent;
+      const secLabel = (numbering[s.id] !== undefined ? "§" + numbering[s.id] + " " : "") + s.title;
+      new IntersectionObserver(entries => {
+        here.textContent = entries[0].isIntersecting ? partLabel : secLabel;
+      }, { rootMargin: "-52px 0px 0px 0px" }).observe(h1);
+    }
   }
 
   function threadBlock(t) {
