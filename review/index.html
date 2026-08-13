@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<!--
+  REVIEW STORE — THE WINDOW
+  v1.0 — 13/08/2026
+
+  Changelog:
+  v1.1 — Reader mode. v1.0 rendered the whole document expanded — at 15k words
+         (heading for more) that is an endless scroll, and on a phone it is
+         unusable as a thing to CONSULT rather than read cover to cover.
+         Sections now render collapsed: number, title, status — one tappable
+         row each — and open in place. Which made the separate Contents block
+         redundant, so it is gone: the collapsed document IS the contents,
+         with the same rows in the same order and nothing to keep in step.
+         Cross-reference links open their target section before jumping to
+         it. Principles, the decisions log, closed threads and the facts
+         ledger fold the same way. Open all / Close all in the header for a
+         straight read-through; a fixed Top link for the way back. Open
+         state survives the live re-render a database write triggers.
+  v1.0 — First build, against review/SPEC.md. Read-only render of /reviewStore:
+         spine (thesis, principles, decisions log), contents, parts and
+         sections in position order with numbers COMPUTED from position —
+         never stored, never typed — subsections as structure, threads with
+         resolution kept below the open ones, facts resolved from one row.
+         Authenticated; renders nothing before auth resolves.
+
+  This page renders the store readable; it never writes. Every section, thread
+  and fact is authored by Claude through the MCP server (get_review /
+  patch_review / export_review against /reviewStore). Same posture as the
+  strategy page, and for the same reason: the document survives by being
+  written deliberately in conversation, not typed into a box.
+
+  It deliberately does not look like the strategy dossier or the desk. This is
+  a manuscript in progress: cool typescript paper rather than the dossier's
+  warm stock, and two voices on the page — the prose in a serif, and the
+  working machinery around it (statuses, part labels, thread states, the
+  drafting notes) in a small sans, so what IS the document and what is
+  scaffolding around it never blur. Light only: paper has no dark mode.
+
+  One colour on the page: a muted red, reserved for authoring faults — a
+  {{ref:...}} whose target does not exist, a {{fact:...}} nothing defines. A
+  fault should be the loudest thing in an otherwise quiet room. Private
+  material is marked plainly (dashed rule, a label, no number) — it is a
+  status, not a warning.
+
+  Access: the node is readable only by the owner's uid (database.rules.json)
+  and writable by nobody. This HTML is public — GitHub Pages serves the repo —
+  but pre-auth the page is blank: no heading, no section labels, no
+  placeholders. Document content is never committed to the repo.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+<!-- Subresource requests (fonts, the Firebase SDK) must not carry this page's
+     URL out in a Referer header. -->
+<meta name="referrer" content="no-referrer">
+<!-- Says nothing on purpose: the tab title is the one thing a passer-by reads. -->
+<title>Private</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&display=swap" rel="stylesheet">
+<style>
+  /* Two voices, split by job: Literata carries everything that IS the
+     document (titles, prose, thesis, thread text); the system sans carries
+     everything that is machinery AROUND it (statuses, part labels, datelines,
+     drafting notes, the contents list). The reader should always know which
+     of the two they are looking at. */
+  :root{
+    --paper:#FBFBF8;     /* cool typescript paper — not the dossier's warm stock */
+    --ink:#1D1C19;
+    --faint:#6E6C66;
+    --hairline:#E3E2DB;
+    --rule:#C6C4BB;
+    --fault:#9C3B2E;     /* the only colour: broken references and unknown facts */
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--paper);color:var(--ink);
+    font-family:'Literata',Georgia,serif;
+    font-size:1.03rem;line-height:1.62;min-height:100vh;padding:0 22px 110px;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:640px;margin:0 auto}
+  .hidden{display:none}
+  a{color:inherit}
+
+  /* The machinery voice: small sans, letterspaced caps for labels. */
+  .m{font-family:var(--sans);font-size:0.72rem;letter-spacing:0.1em;
+    text-transform:uppercase;color:var(--faint)}
+
+  header{padding:56px 0 22px;margin-bottom:6px;border-bottom:2px solid var(--ink)}
+  h1{font-weight:700;font-size:1.6rem;line-height:1.2}
+  .stamp{font-family:var(--sans);font-size:0.78rem;color:var(--faint);margin-top:10px}
+
+  h2{font-weight:600;font-size:1rem;letter-spacing:0.1em;text-transform:uppercase;
+    margin:54px 0 0;padding-bottom:8px;border-bottom:1px solid var(--rule)}
+  .section-note{font-size:0.9rem;font-style:italic;color:var(--faint);margin:12px 0 0;max-width:58ch}
+
+  /* Spine */
+  .thesis{margin-top:20px;font-size:1.12rem;font-style:italic;max-width:56ch}
+  .principles{margin:20px 0 0;padding-left:1.5em}
+  .principles li{margin-bottom:9px;max-width:56ch;padding-left:0.3em}
+  .principles li::marker{color:var(--faint);font-size:0.85em}
+  .decisions{margin-top:22px}
+  .decisions li{list-style:none;padding:9px 0;border-bottom:1px solid var(--hairline);
+    display:flex;gap:16px;align-items:baseline}
+  .decisions li:last-child{border-bottom:none}
+  .decisions .ts{font-family:var(--sans);font-size:0.76rem;color:var(--faint);
+    white-space:nowrap;width:5.2em;flex-shrink:0}
+  .decisions .why{color:var(--faint);font-style:italic}
+
+  /* Folding. The document renders collapsed — one row per section — so the
+     closed state IS the contents page, and opening reads in place. Native
+     details/summary: no state to manage, works without a pointer. */
+  details>summary{list-style:none;cursor:pointer}
+  details>summary::-webkit-details-marker{display:none}
+  .sec>summary{position:relative;padding-right:30px}
+  .sec>summary::after{content:'+';position:absolute;right:2px;top:0;
+    font-family:var(--sans);font-size:1.05rem;color:var(--faint)}
+  .sec[open]>summary::after{content:'\2212'}
+
+  .fold{margin-top:16px}
+  .fold>summary{font-family:var(--sans);font-size:0.72rem;letter-spacing:0.1em;
+    text-transform:uppercase;color:var(--faint);padding:8px 0;
+    border-bottom:1px solid var(--hairline)}
+  .fold>summary::after{content:' +'}
+  .fold[open]>summary::after{content:' \2212'}
+
+  .ctrl{font-family:var(--sans);font-size:0.7rem;font-weight:400;letter-spacing:0.1em;
+    text-transform:uppercase;background:none;border:none;padding:0;
+    border-bottom:1px dotted var(--rule);color:var(--faint);cursor:pointer}
+  .ctrl:hover{background:none;color:var(--ink)}
+  .controls{margin-top:12px;display:flex;gap:22px}
+
+  .tocjump{position:fixed;right:14px;bottom:14px;font-family:var(--sans);
+    font-size:0.68rem;letter-spacing:0.12em;text-transform:uppercase;
+    color:var(--faint);text-decoration:none;background:var(--paper);
+    border:1px solid var(--rule);padding:8px 13px}
+
+  /* The document */
+  .part-head{margin-top:64px}
+  .part-head .m{display:block;margin-bottom:6px}
+  .part-head h2{margin-top:0;font-size:1.28rem;letter-spacing:0;text-transform:none;
+    border-bottom:2px solid var(--ink);padding-bottom:10px}
+
+  /* Closed: a two-line row in a list. Open: a section of the manuscript. */
+  .sec{padding:16px 0;border-bottom:1px solid var(--hairline)}
+  .sec[open]{padding:22px 0 36px}
+  .sec:last-child{border-bottom:none}
+  .sec h3{font-weight:600;font-size:1.16rem;line-height:1.35}
+  .sec h3 .num{color:var(--faint);font-weight:400}
+  .sec-meta{margin-top:5px;display:flex;gap:14px;flex-wrap:wrap}
+  .sec .body{margin-top:14px}
+  .sec .body p,.sec .body ul,.sec .body ol,.sec .body blockquote{
+    margin-top:12px;max-width:58ch}
+  .sec .body ul,.sec .body ol{padding-left:1.5em}
+  .sec .body li{margin-bottom:6px}
+  .sec .body blockquote{padding-left:16px;border-left:2px solid var(--rule);font-style:italic}
+  .sec .body code{font-family:ui-monospace,Menlo,monospace;font-size:0.88em;
+    background:var(--hairline);padding:1px 4px}
+  .sub{margin-top:26px}
+  .sub h4{font-weight:600;font-size:1.02rem}
+  .sub h4 .num{color:var(--faint);font-weight:400}
+
+  /* Statuses live on an ink scale, not a colour scale: how much of the
+     section exists is a question of ink on the page. */
+  .st{font-family:var(--sans);font-size:0.68rem;letter-spacing:0.12em;
+    text-transform:uppercase;color:var(--faint)}
+  .st.empty::before{content:'○ '}
+  .st.outlined::before{content:'◔ '}
+  .st.drafted::before{content:'◕ '}
+  .st.refined{color:var(--ink)}
+  .st.refined::before{content:'● '}
+
+  /* Private: a status, marked plainly — no number, no export, no alarm. */
+  .private-block{border-left:1px dashed var(--rule);padding-left:18px}
+  .private-tag{font-family:var(--sans);font-size:0.68rem;letter-spacing:0.12em;
+    text-transform:uppercase;color:var(--faint);
+    border:1px dashed var(--rule);padding:2px 7px}
+
+  /* Machinery attached to a section: drafting notes, the referenced-from line. */
+  .notes{margin-top:18px;padding:10px 14px;background:#F2F2ED;
+    font-family:var(--sans);font-size:0.85rem;line-height:1.55;color:#55534D;
+    letter-spacing:0;text-transform:none;max-width:58ch}
+  .notes .m{display:block;margin-bottom:4px}
+  .refby{margin-top:14px;font-family:var(--sans);font-size:0.78rem;color:var(--faint)}
+  .refby a{text-decoration:none;border-bottom:1px dotted var(--rule)}
+
+  .xref{text-decoration:none;border-bottom:1px dotted var(--rule);white-space:nowrap}
+  .fact{border-bottom:1px dotted var(--rule);cursor:help}
+  .fault{color:var(--fault);font-family:var(--sans);font-size:0.85em}
+
+  .empty-note{font-size:0.92rem;color:var(--faint);font-style:italic;padding:14px 0}
+
+  /* Threads: open carry full ink; closure is a strike that stays legible —
+     the existing strike-through-and-retain convention, kept. */
+  .thread{padding:16px 0;border-bottom:1px solid var(--hairline)}
+  .thread:last-child{border-bottom:none}
+  .thread .targets{margin-bottom:4px;display:flex;gap:10px;flex-wrap:wrap;align-items:baseline}
+  .thread .text{max-width:58ch}
+  .thread .framing{margin-top:6px;font-style:italic;color:var(--faint);
+    font-size:0.92rem;max-width:56ch}
+  .thread.closed .text{text-decoration:line-through;
+    text-decoration-color:var(--rule);color:var(--faint)}
+  .thread .resolution{margin-top:6px;font-size:0.92rem;max-width:56ch}
+  .thread .resolution .m{margin-right:8px}
+
+  /* Facts: the ledger of figures the prose resolves from. */
+  .facts{width:100%;border-collapse:collapse;margin-top:18px;font-size:0.94rem}
+  .facts td{padding:9px 18px 9px 0;border-bottom:1px solid var(--hairline);vertical-align:baseline}
+  .facts tr:last-child td{border-bottom:none}
+  .facts .slug{font-family:ui-monospace,Menlo,monospace;font-size:0.78rem;color:var(--faint)}
+  .facts .val{font-weight:600;white-space:nowrap}
+
+  .panel{max-width:400px;margin:22vh auto;text-align:center}
+  .panel p{color:var(--faint);margin-bottom:22px;font-style:italic}
+  button{font-family:var(--sans);font-size:0.78rem;font-weight:600;letter-spacing:0.13em;
+    text-transform:uppercase;padding:11px 26px;background:transparent;color:var(--ink);
+    border:1px solid var(--ink);cursor:pointer}
+  button:hover{background:var(--ink);color:var(--paper)}
+  footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--rule);
+    font-family:var(--sans);font-size:0.78rem;color:var(--faint)}
+
+  @media (max-width:520px){
+    body{font-size:0.99rem;padding:0 18px 80px}
+    header{padding-top:36px}
+    /* Tighter vertical rhythm: on a phone the closed document should read as
+       one list, not a scroll of white space. */
+    h2{margin-top:40px}
+    .part-head{margin-top:44px}
+    .decisions li{flex-direction:column;gap:2px}
+    .decisions .ts{width:auto}
+  }
+</style>
+</head>
+<body>
+
+<!-- Nothing below says what this page is until the read succeeds. The gate is
+     a bare control, the loading state is blank, and the header is injected by
+     render() — a visitor who is signed out, or signed in as somebody else,
+     gets an empty page, not the shape of a document with the contents
+     withheld. (As on the strategy page: this empties the DOM, not the source —
+     view-source still shows the renderer. Content is never in either.) -->
+
+<div id="gate" class="panel hidden">
+  <button id="signin">Sign in</button>
+</div>
+
+<div id="loading" class="panel"></div>
+
+<div id="error" class="panel hidden"><p id="errmsg"></p></div>
+
+<div id="doc" class="wrap hidden">
+  <header id="head"></header>
+  <div id="spine"></div>
+  <div id="bodytext"></div>
+  <div id="threads"></div>
+  <div id="facts"></div>
+  <footer id="foot"></footer>
+  <div id="jump"></div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey: "AIzaSyA3ga4wTbLELE3jvrl40j7OclsYCt8PtIo",
+    authDomain: "morning-walks-42eb6.firebaseapp.com",
+    databaseURL: "https://morning-walks-42eb6-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "morning-walks-42eb6"
+  });
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const show = id => { ["gate","loading","error","doc"].forEach(x => $(x).classList.add("hidden"));
+    $(id).classList.remove("hidden"); };
+  // RTDB collapses sparse arrays into objects, so never assume Array here.
+  const asArray = v => Array.isArray(v) ? v : Object.values(v || {});
+  const fail = msg => { $("errmsg").textContent = msg; show("error"); };
+
+  $("signin").addEventListener("click", () =>
+    firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
+      .catch(e => fail("Sign-in failed: " + e.message)));
+
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) { show("gate"); return; }
+    show("loading");
+    firebase.database().ref("reviewStore").on("value",
+      snap => render(snap.val()),
+      err => fail(err.code === "PERMISSION_DENIED"
+        ? "This account doesn't have access."
+        : "Couldn't load: " + err.message));
+  });
+
+  const fmtStamp = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? String(iso || "") : d.toLocaleString("en-GB",
+      { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  };
+  const fmtDay = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? String(iso || "") : d.toLocaleDateString("en-GB",
+      { day:"2-digit", month:"2-digit", year:"2-digit" });
+  };
+
+  const byPos = list => asArray(list).slice()
+    .sort((a, b) => (Number(a?.position) || 0) - (Number(b?.position) || 0));
+
+  /* Numbers are never stored — computed here from position, identically to the
+     server (rvNumbering in walk-mcp/server.js; change one, change both).
+     Private material is skipped, not numbered-then-hidden, so what this page
+     shows is exactly what an export freezes. */
+  function numberingOf(doc) {
+    const map = {};
+    let n = 0;
+    byPos(doc.parts).forEach((part, pi) => {
+      map[part.id] = String(pi + 1);
+      byPos(asArray(doc.sections).filter(s => String(s?.partId) === String(part.id)))
+        .forEach(s => {
+          if (s.visibility === "private") return;
+          map[s.id] = String(++n);
+          let m = 0;
+          byPos(asArray(s.subsections)).forEach(sub => {
+            if (sub.visibility === "private") return;
+            map[sub.id] = n + "." + (++m);
+          });
+        });
+    });
+    return map;
+  }
+
+  /* ---------- markdown + marker resolution ----------
+     Bodies are markdown prose: paragraphs, lists, quotes, bold, italic, code.
+     No headings — structure lives in subsections, and heading depth is this
+     page's concern, which is the whole point (spec §3.2). Escape first;
+     {{ref:...}} and {{fact:...}} markers survive escaping untouched, so they
+     resolve after, injecting known-safe markup. */
+
+  let secById = {}, subById = {}, factById = {}, numbering = {};
+
+  const resolveMarkers = html => html
+    .replace(/\{\{ref:([A-Za-z0-9_-]+)\}\}/g, (_, id) => {
+      const target = secById[id] || subById[id];
+      if (!target) return '<span class="fault" title="no section or subsection has this id">[unresolved reference: ' + esc(id) + ']</span>';
+      const n = numbering[id];
+      if (n === undefined) return '<span class="fault" title="the target is private and carries no number">[reference to private material]</span>';
+      return '<a class="xref" href="#x-' + esc(id) + '" title="' + esc(target.title) + '">§' + n + '</a>';
+    })
+    .replace(/\{\{fact:([A-Za-z0-9_-]+)\}\}/g, (_, id) => {
+      const f = factById[id];
+      if (!f) return '<span class="fault" title="no fact has this id">[unknown fact: ' + esc(id) + ']</span>';
+      return '<span class="fact" title="' + esc(f.label || f.id) + '">' + esc(f.value) + '</span>';
+    });
+
+  const inline = s => resolveMarkers(esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*\n]+)\*/g, "<em>$1</em>"));
+
+  function md(text) {
+    return String(text || "").split(/\n\s*\n/).map(b => b.trim()).filter(Boolean)
+      .map(b => {
+        const lines = b.split("\n");
+        if (lines.every(l => /^[-*] /.test(l)))
+          return "<ul>" + lines.map(l => "<li>" + inline(l.slice(2)) + "</li>").join("") + "</ul>";
+        if (lines.every(l => /^\d+[.)] /.test(l)))
+          return "<ol>" + lines.map(l => "<li>" + inline(l.replace(/^\d+[.)] /, "")) + "</li>").join("") + "</ol>";
+        if (lines.every(l => /^>/.test(l)))
+          return "<blockquote><p>" + inline(lines.map(l => l.replace(/^> ?/, "")).join("\n")).replace(/\n/g, "<br>") + "</p></blockquote>";
+        return "<p>" + inline(b).replace(/\n/g, "<br>") + "</p>";
+      }).join("");
+  }
+
+  // Which sections point at a given id — derived on every render, never stored.
+  function referencedByIndex(doc) {
+    const idx = {};
+    const scan = (text, fromId) => {
+      String(text || "").replace(/\{\{ref:([A-Za-z0-9_-]+)\}\}/g, (m, target) => {
+        (idx[target] = idx[target] || []).includes(fromId) || idx[target].push(fromId);
+        return m;
+      });
+    };
+    asArray(doc.sections).forEach(s => {
+      scan(s.body, s.id); scan(s.notes, s.id);
+      asArray(s.subsections).forEach(sub => scan(sub.body, s.id));
+    });
+    return idx;
+  }
+
+  const statusChip = s =>
+    '<span class="st ' + esc(s.status || "empty") + '">' + esc(s.status || "empty") + '</span>';
+  const privateTag = '<span class="private-tag">Private — not in export</span>';
+
+  function subBlock(sub) {
+    const priv = sub.visibility === "private";
+    return '<div class="sub' + (priv ? ' private-block' : '') + '" id="x-' + esc(sub.id) + '">' +
+      '<h4>' + (priv ? "" : '<span class="num">' + esc(numbering[sub.id] || "") + '&ensp;</span>') +
+      esc(sub.title) + (priv ? " &ensp;" + privateTag : "") + '</h4>' +
+      '<div class="body">' + md(sub.body) + '</div></div>';
+  }
+
+  // A closed section is a row in a list — number, title, status — which is
+  // why there is no separate contents block: this IS the contents, in the
+  // same order, with nothing to keep in step. Opening reads in place.
+  function sectionBlock(s, refby) {
+    const priv = s.visibility === "private";
+    const sources = (refby[s.id] || []).map(id => numbering[id])
+      .filter(n => n !== undefined).sort((a, b) => Number(a) - Number(b));
+    return '<details class="sec' + (priv ? ' private-block' : '') + '" id="x-' + esc(s.id) + '">' +
+      '<summary><h3>' + (priv ? "" : '<span class="num">' + esc(numbering[s.id] || "") + '.&ensp;</span>') +
+      esc(s.title) + '</h3>' +
+      '<div class="sec-meta">' + statusChip(s) +
+        (s.lengthTarget ? '<span class="m">' + esc(s.lengthTarget) + '</span>' : "") +
+        (priv ? privateTag : "") + '</div></summary>' +
+      (String(s.body || "").trim() ? '<div class="body">' + md(s.body) + '</div>'
+        : '<p class="empty-note">Nothing drafted here yet.</p>') +
+      byPos(asArray(s.subsections)).map(subBlock).join("") +
+      (s.notes ? '<div class="notes"><span class="m">Drafting notes</span>' + esc(s.notes) + '</div>' : "") +
+      (sources.length ? '<p class="refby">Referenced from ' +
+        sources.map(n => '§' + esc(n)).join(", ") + '</p>' : "") +
+      '</details>';
+  }
+
+  function threadBlock(t) {
+    const closed = t.status && t.status !== "open";
+    const targets = asArray(t.targets).map(id => {
+      const n = numbering[id];
+      return n === undefined ? null :
+        '<a class="xref" href="#x-' + esc(id) + '" title="' + esc((secById[id] || {}).title || "") + '">§' + n + '</a>';
+    }).filter(Boolean);
+    return '<div class="thread' + (closed ? " closed" : "") + '">' +
+      '<div class="targets">' +
+        (targets.length ? targets.join(" ") : '<span class="m">Document-wide</span>') +
+        (t.visibility === "private" ? " " + privateTag : "") + '</div>' +
+      '<p class="text">' + esc(t.text) + '</p>' +
+      (t.framing ? '<p class="framing">' + esc(t.framing) + '</p>' : "") +
+      (closed ? '<p class="resolution"><span class="m">' + esc(t.status) +
+        (t.resolvedTs ? " · " + esc(fmtDay(t.resolvedTs)) : "") + '</span>' +
+        esc(t.resolution || "") + '</p>' : "") +
+      '</div>';
+  }
+
+  function render(doc) {
+    if (!doc) {
+      fail("The store is empty. It is seeded in conversation — insert_part, then insert_section, through the Review connector.");
+      return;
+    }
+    const parts = byPos(doc.parts);
+    const sections = asArray(doc.sections);
+    const threads = asArray(doc.threads);
+    const facts = asArray(doc.facts);
+    const spine = doc.spine || {};
+
+    secById = {}; subById = {}; factById = {};
+    sections.forEach(s => { secById[s.id] = s;
+      asArray(s.subsections).forEach(sub => { subById[sub.id] = sub; }); });
+    facts.forEach(f => { factById[f.id] = f; });
+    numbering = numberingOf(doc);
+    const refby = referencedByIndex(doc);
+
+    const counts = {};
+    sections.forEach(s => { const k = s.status || "empty"; counts[k] = (counts[k] || 0) + 1; });
+    const open = threads.filter(t => !t.status || t.status === "open");
+
+    // A live write re-renders the page; whatever was open stays open.
+    const wasOpen = new Set(Array.from(document.querySelectorAll("details[open]"))
+      .map(d => d.id).filter(Boolean));
+
+    // Header written here, not in the markup — the page has no title and no
+    // shape until the read has actually come back.
+    $("head").innerHTML =
+      '<h1 id="top">' + esc(spine.title || "Working draft") + '</h1>' +
+      '<div class="stamp">Last written ' + esc(fmtStamp(doc.meta && doc.meta.lastUpdated)) +
+      ' &nbsp;·&nbsp; ' + sections.length + ' section' + (sections.length === 1 ? "" : "s") +
+      ' (' + ["refined", "drafted", "outlined", "empty"].filter(k => counts[k])
+        .map(k => counts[k] + " " + k).join(", ") + ')' +
+      ' &nbsp;·&nbsp; ' + open.length + ' open thread' + (open.length === 1 ? "" : "s") + '</div>' +
+      '<div class="controls"><button class="ctrl" id="openall">Open all</button>' +
+      '<button class="ctrl" id="closeall">Close all</button></div>';
+    $("openall").onclick = () =>
+      document.querySelectorAll("details").forEach(d => { d.open = true; });
+    $("closeall").onclick = () =>
+      document.querySelectorAll("details").forEach(d => { d.open = false; });
+
+    $("spine").innerHTML =
+      '<h2>Spine</h2>' +
+      (spine.thesis ? '<p class="thesis">' + esc(spine.thesis) + '</p>' : "") +
+      (asArray(spine.principles).length ?
+        '<details class="fold" id="fold-principles"><summary>Principles — ' +
+        asArray(spine.principles).length + ', governing every section</summary>' +
+        '<ol class="principles">' + asArray(spine.principles).map(p =>
+          '<li>' + esc(p) + '</li>').join("") + '</ol></details>' : "") +
+      (asArray(spine.decisions).length ?
+        '<details class="fold" id="fold-decisions"><summary>Decisions during drafting — ' +
+        asArray(spine.decisions).length + ', append-only</summary>' +
+        '<ul class="decisions">' + asArray(spine.decisions).map(d =>
+          '<li><span class="ts">' + esc(fmtDay(d.ts)) + '</span><span>' + esc(d.what) +
+          (d.why ? ' <span class="why">— ' + esc(d.why) + '</span>' : "") + '</span></li>').join("") +
+        '</ul></details>' : "");
+
+    $("bodytext").innerHTML = parts.map(part => {
+      const inPart = byPos(sections.filter(s => String(s.partId) === String(part.id)));
+      return '<div class="part-head"><span class="m">Part ' + esc(numbering[part.id]) +
+        '</span><h2>' + esc(part.title) + '</h2></div>' +
+        (inPart.length ? inPart.map(s => sectionBlock(s, refby)).join("")
+          : '<p class="empty-note">No sections in this part yet.</p>');
+    }).join("");
+
+    // Open first and always visible — they are the working state. Closure is
+    // a strike that stays, folded away but never deleted.
+    const closed = threads.filter(t => t.status && t.status !== "open");
+    $("threads").innerHTML = !threads.length ? "" :
+      '<h2>Threads</h2>' +
+      '<p class="section-note">Open questions, unresolved points and standing revision rules.' +
+      ' A thread with no target applies to the whole document. Resolution is a status,' +
+      ' never a deletion.</p>' +
+      (open.length ? open.map(threadBlock).join("") :
+        '<p class="empty-note">Nothing open.</p>') +
+      (closed.length ? '<details class="fold" id="fold-closed"><summary>Closed — ' +
+        closed.length + ', kept for the record</summary>' +
+        closed.map(threadBlock).join("") + '</details>' : "");
+
+    $("facts").innerHTML = !facts.length ? "" :
+      '<h2>Facts</h2>' +
+      '<details class="fold" id="fold-facts"><summary>The ledger — ' + facts.length +
+      ' figure' + (facts.length === 1 ? "" : "s") + ', each living once, resolved into the prose at render</summary>' +
+      '<table class="facts">' + facts.map(f =>
+        '<tr><td class="val">' + esc(f.value) + '</td><td>' + esc(f.label || "") +
+        '</td><td class="slug">{{fact:' + esc(f.id) + '}}</td></tr>').join("") + '</table></details>';
+
+    const privCount = sections.filter(s => s.visibility === "private").length +
+      threads.filter(t => t.visibility === "private").length;
+    $("foot").textContent =
+      (open.length ? open.length + " thread" + (open.length === 1 ? "" : "s") + " open. " : "") +
+      (privCount ? privCount + " private item" + (privCount === 1 ? "" : "s") +
+        " held on the page, out of every export. " : "") +
+      "Numbers on this page are computed, not stored — an export freezes them.";
+    $("jump").innerHTML = '<a class="tocjump" href="#top">Top</a>';
+
+    wasOpen.forEach(id => { const el = document.getElementById(id); if (el) el.open = true; });
+    show("doc");
+  }
+
+  // A link to a collapsed section (a cross-reference, a thread target) opens
+  // it before the jump, so the reader lands on prose, not on a closed row.
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[href^='#']");
+    if (!a) return;
+    const el = document.getElementById(a.getAttribute("href").slice(1));
+    if (el && el.tagName === "DETAILS") el.open = true;
+  });
+</script>
+</body>
+</html>

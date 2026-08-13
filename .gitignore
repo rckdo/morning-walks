@@ -5,3 +5,10 @@ node_modules/
 # committed; what they hold is not. See GOTCHAS.md §4a.
 strategy/seed.json
 strategy/*.seed.json
+
+# Same rule for the review store: the document's content never enters this
+# repo. Seeding is conversational (see review/SPEC.md §7), but if a working
+# copy is ever dropped here it must not be committable by accident.
+review/seed.json
+review/*.seed.json
+review/export*.md
