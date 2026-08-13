@@ -4,6 +4,12 @@
   v2.0 — 13/08/2026
 
   Changelog:
+  v2.3 — The locked header tracks subsections. v2.2 swapped the crumb to the
+         section label and stopped there — three subsections deep in a long
+         scroll it was still saying §1. Now it names the deepest heading that
+         has passed under it: the part at the top, then §1, then §1.1, §1.2
+         as each subsection arrives, back again as you scroll up. A private
+         subsection shows its title, unnumbered, as everywhere else.
   v2.2 — Sticky bearings. Two additions, both about knowing where you are in
          the middle of a long section on a phone:
          - The crumb bar locks to the top of the screen, and once the section
@@ -428,6 +434,7 @@
   function route(fromNav) {
     if (!DOC) { fail("Nothing here yet."); return; }
     reindex(DOC);
+    spyHeadings = []; spyTarget = null; spyBase = "";
     const h = decodeURIComponent(location.hash.slice(1));
     if (h.startsWith("x-")) {
       const id = h.slice(2);
@@ -547,18 +554,36 @@
         esc(secById[order[i + 1]].title) + ' &rsaquo;</a>' : "") +
       '</div></div>';
 
-    // Once the heading scrolls under the sticky crumb, the crumb carries the
-    // section's own label instead of the part's.
-    const h1 = document.querySelector(".page h1");
-    const here = document.querySelector(".crumb .here");
-    if (h1 && here && "IntersectionObserver" in window) {
-      const partLabel = here.textContent;
-      const secLabel = (numbering[s.id] !== undefined ? "§" + numbering[s.id] + " " : "") + s.title;
-      new IntersectionObserver(entries => {
-        here.textContent = entries[0].isIntersecting ? partLabel : secLabel;
-      }, { rootMargin: "-52px 0px 0px 0px" }).observe(h1);
+    // The crumb names the deepest heading that has scrolled under it — part,
+    // then section, then subsection by subsection — so a long scroll never
+    // loses its place.
+    spyHeadings = [];
+    spyTarget = document.querySelector(".crumb .here");
+    if (spyTarget) {
+      spyBase = spyTarget.textContent;
+      const h1 = document.querySelector(".page h1");
+      const label = (id, title) =>
+        (numbering[id] !== undefined ? "§" + numbering[id] + " " : "") + title;
+      if (h1) spyHeadings.push({ el: h1, label: label(s.id, s.title) });
+      byPos(asArray(s.subsections)).forEach(sub => {
+        const el = document.getElementById("x-" + sub.id);
+        if (el) spyHeadings.push({ el, label: label(sub.id, sub.title) });
+      });
+      spy();
     }
   }
+
+  /* ---------- scroll spy for the locked header ---------- */
+  let spyHeadings = [], spyBase = "", spyTarget = null;
+  function spy() {
+    if (!spyTarget || !document.contains(spyTarget)) return;
+    let label = spyBase;
+    for (const h of spyHeadings) {
+      if (h.el.getBoundingClientRect().top <= 60) label = h.label; else break;
+    }
+    if (spyTarget.textContent !== label) spyTarget.textContent = label;
+  }
+  window.addEventListener("scroll", () => window.requestAnimationFrame(spy), { passive: true });
 
   function threadBlock(t) {
     const closed = t.status && t.status !== "open";
