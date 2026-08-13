@@ -4,6 +4,13 @@
   v2.0 — 13/08/2026
 
   Changelog:
+  v2.1 — Markdown tables. The renderer treated a pipe table as a paragraph
+         and printed the bars. A block whose lines all start with | now
+         renders as a table — header row honoured when a |---| separator
+         follows it, cells carry inline styling and {{ref}}/{{fact}}
+         resolution, and the table scrolls inside its own container on a
+         narrow screen rather than widening the page. The markdown EXPORT
+         needed no change: tables pass through it verbatim, already valid.
   v2.0 — Pages, and dewaffle. Two steers from the owner, applied together:
          - PAGINATED, NOT ACCORDION. The fold model made every section a row
            that opened in place; fine as a list, wrong as a reading
@@ -127,6 +134,16 @@
   .body blockquote{padding-left:16px;border-left:2px solid var(--rule);font-style:italic}
   .body code{font-family:ui-monospace,Menlo,monospace;font-size:0.88em;
     background:var(--hairline);padding:1px 4px}
+  /* A wide table scrolls inside its own box; the page never scrolls sideways. */
+  .tablewrap{margin-top:14px;max-width:100%;overflow-x:auto}
+  .mdt{border-collapse:collapse;font-size:0.92rem;min-width:100%}
+  .mdt th{text-align:left;font-family:var(--sans);font-size:0.68rem;font-weight:600;
+    letter-spacing:0.12em;text-transform:uppercase;color:var(--faint);
+    padding:0 18px 7px 0;border-bottom:1px solid var(--rule);white-space:nowrap}
+  .mdt td{padding:9px 18px 9px 0;border-bottom:1px solid var(--hairline);
+    vertical-align:top}
+  .mdt tr:last-child td{border-bottom:none}
+  .mdt th:last-child,.mdt td:last-child{padding-right:0}
   .sub{margin-top:34px}
   .sub h2{font-weight:600;font-size:1.08rem}
   .sub h2 .num{color:var(--faint);font-weight:400}
@@ -347,6 +364,18 @@
     return String(text || "").split(/\n\s*\n/).map(b => b.trim()).filter(Boolean)
       .map(b => {
         const lines = b.split("\n");
+        if (lines.length > 1 && lines.every(l => l.trim().startsWith("|"))) {
+          const rows = lines.map(l => l.trim().replace(/^\|/, "").replace(/\|$/, "")
+            .split("|").map(c => c.trim()));
+          const isSep = r => r.length > 0 && r.every(c => /^:?-+:?$/.test(c));
+          const header = rows.length > 1 && isSep(rows[1]) ? rows[0] : null;
+          const body = (header ? rows.slice(2) : rows).filter(r => !isSep(r));
+          return '<div class="tablewrap"><table class="mdt">' +
+            (header ? '<thead><tr>' + header.map(c => '<th>' + inline(c) + '</th>').join("") +
+              '</tr></thead>' : "") +
+            '<tbody>' + body.map(r => '<tr>' + r.map(c => '<td>' + inline(c) + '</td>').join("") +
+              '</tr>').join("") + '</tbody></table></div>';
+        }
         if (lines.every(l => /^[-*] /.test(l)))
           return "<ul>" + lines.map(l => "<li>" + inline(l.slice(2)) + "</li>").join("") + "</ul>";
         if (lines.every(l => /^\d+[.)] /.test(l)))
