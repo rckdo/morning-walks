@@ -1,12 +1,21 @@
 /*
   POSTITPA — BOARD SERVER
-  v119.0 — 13/08/2026
+  v120.0 — 13/08/2026
   (Supersedes every earlier server file in this build — deploy this one.)
 
   This server reads and writes the board. It does not think. There is no
   model call in this file and no API key on the service.
 
   Changelog:
+  v120.0 — removeScratch. The pad had two exits and needed three: ingest
+           promotes an item into an observation, clearScratch empties the lot,
+           and there was no way to bin ONE piece of junk sitting among things
+           worth keeping. The two bad workarounds that leaves are ingesting it
+           somewhere it does not belong — which quietly corrupts the record the
+           whole design exists to protect — or leaving it on the pad until
+           everything else has been dealt with. Mirrors removeEvidence and
+           removeQuestion, including refusing an unknown id rather than
+           silently succeeding.
   v119.0 — The strategy record gains a third settled section and two evidence
            qualifiers, all from one addendum that would not fit v118's shape.
 
@@ -356,7 +365,7 @@ const archiveDelta = (board, operations, applied) =>
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "119.0" });
+  const server = new McpServer({ name: "walk-reference", version: "120.0" });
 
   server.tool(
     "get_reference",
@@ -1015,6 +1024,7 @@ function buildServer() {
     "THE RITUAL — capture is constant, committing is deliberate. Keep them apart:\n" +
     "  { op:'appendScratch', text:'...', anchor:'<short tag>' }  — throw a loose item on the pad. Cheap, low-ceremony, do this freely all session. Server assigns id + ts. NEVER needs permission.\n" +
     "  { op:'ingest', scratchId:'x3', observationId:'o2', date:'w/c 10/08/2026', text:'...', confirm:true }  — fold ONE pad item up into an observation as dated evidence and drop it from the pad, atomically. ONLY on Richard's explicit go-ahead. text defaults to the scratch item's own text; date defaults to 'Ongoing'.\n" +
+    "  { op:'removeScratch', scratchId:'x3' }  — BIN one pad item without touching the others. For junk sitting among things worth keeping: the alternative is ingesting it somewhere it does not belong, or leaving it until the whole pad is cleared. Note the id prefix is 'x' (x1, x2, x3), not 's' — 's' ids are solutions.\n" +
     "  { op:'clearScratch' }  — empty the pad once everything on it has been ingested or judged not worth keeping.\n" +
     "TIER 1 — observations stay GENERAL; specific incidents are evidence, never observations:\n" +
     "  { op:'addObservation', title:'...', text:'...', foundational:true }  — promote a genuinely distinct new structural truth (server assigns id + next letter). Use sparingly: prefer new evidence under an existing observation. foundational:true marks substrate the other observations are downstream of — rare by definition, because if everything is foundational nothing is. text may contain blank lines; the page renders them as paragraphs.\n" +
@@ -1090,6 +1100,20 @@ function buildServer() {
               obs.evidence.push(ev);
               doc.scratch = doc.scratch.filter(s => String(s?.id) !== String(o.scratchId));
               applied.push("ingest " + o.scratchId + " -> " + obs.id + " (" + ev.id + ")");
+              break;
+            }
+
+            case "removeScratch": {
+              // Bin one item without touching the rest. Until this existed the
+              // only exits from the pad were ingest (which promotes) and
+              // clearScratch (which empties), so a single piece of junk sitting
+              // among good items could not be dropped — it had to be ingested
+              // into somewhere it did not belong, or survive until the whole pad
+              // was cleared. Mirrors removeEvidence and removeQuestion.
+              const before = doc.scratch.length;
+              doc.scratch = doc.scratch.filter(s => String(s?.id) !== String(o.scratchId));
+              if (doc.scratch.length === before) { errors.push("op " + i + ": scratch item " + o.scratchId + " not found"); break; }
+              applied.push("scratch- " + o.scratchId);
               break;
             }
 
@@ -1319,4 +1343,4 @@ app.get(PATH, (_req, res) => res.status(405).send("POST only"));
 app.get("/", (_req, res) => res.send("walk-reference MCP: ok"));
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log("postitpa board server v119 listening on " + port));
+app.listen(port, () => console.log("postitpa board server v120 listening on " + port));

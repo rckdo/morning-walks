@@ -1,9 +1,21 @@
 <!DOCTYPE html>
 <!--
   STRATEGIC OBSERVATIONS
-  v1.2 — 13/08/2026
+  v1.3 — 13/08/2026
 
   Changelog:
+  v1.3 — The pad in cool ink. Uncommitted material was reading as part of the
+         record: same warm stock, same rules, same everything but italics.
+         Now the pad carries a cool grey wash and cool text against the warm
+         paper — pencil laid on it rather than ink on it. Cool reads as
+         provisional where warm reads as settled, and it does that without
+         importing the urgency an amber or a red would; nothing on the pad is
+         a warning, it simply is not banked yet.
+         COLOUR ONLY, and scoped to #tier2. Every rule sets a colour and
+         nothing else, and the wash takes its breathing room from padding the
+         rows already had — so a full band appears with no box changing shape.
+         Verified by diffing computed geometry and type across 73 elements
+         before and after: none moved.
   v1.2 — Analysis, quotations, substrate. Three additions, all so that a thing
          lands in exactly one place:
          - An ANALYSIS section between the settled observations and the pad.
@@ -74,7 +86,15 @@
     --faint:#6B6459;
     --hairline:#DDD6C7;
     --rule:#B9B0A0;
-    --oxblood:#8A3324;    /* the only colour on the page, and only for [confirm] */
+    --oxblood:#8A3324;    /* the only accent on the record itself, and only for [confirm] */
+
+    /* The pad is COOL against warm stock — pencil laid on paper, not ink on it.
+       Cool reads as provisional where warm reads as settled, and it does that
+       without any of the urgency an amber or a red would import. Nothing on the
+       pad is a warning; it is simply not part of the record yet. */
+    --pad-wash:#EAEBEC;
+    --pad-ink:#5E636B;
+    --pad-rule:#D2D5D9;
   }
   *{margin:0;padding:0;box-sizing:border-box}
   html{-webkit-text-size-adjust:100%}
@@ -173,6 +193,19 @@
   .scratch .anchor{font-size:0.78rem;color:var(--faint);font-style:normal;
     letter-spacing:0.04em}
   .empty{font-size:0.92rem;color:var(--faint);font-style:italic;padding:14px 0}
+
+  /* ---- The pad, in cool ink ----
+     COLOUR ONLY, and scoped to #tier2 so it cannot reach the record. Every rule
+     below sets a colour and nothing else: no padding, no margin, no size, no
+     weight, no family. The wash sits on rows that already carry 11px of vertical
+     padding, so it gets its breathing room from spacing that was there before —
+     which is how a full band appears without a single box changing shape. */
+  #tier2 h2{border-bottom-color:var(--pad-rule);color:var(--pad-ink)}
+  #tier2 h2 .tier,#tier2 .tier-note{color:var(--pad-ink)}
+  #tier2 .scratch li{background:var(--pad-wash);color:var(--pad-ink);
+    border-bottom-color:var(--pad-rule)}
+  #tier2 .scratch .ts,#tier2 .scratch .anchor{color:var(--pad-ink)}
+  #tier2 .empty{color:var(--pad-ink)}
 
   .questions{margin-top:22px}
   .questions p{margin-bottom:18px;max-width:58ch}
