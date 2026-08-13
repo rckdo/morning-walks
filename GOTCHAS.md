@@ -179,13 +179,77 @@ Archive keys are timestamps nudged forward on collision, so two writes in the sa
 
 ---
 
+## 4b. Strategy page — exposure model, and what it does NOT cover
+
+Audited 13/08/2026. The record holds candid assessment of colleagues, so it is worth being exact about which parts are actually protected and which only look it.
+
+### What is genuinely protected
+
+- **The content.** `/strategyReference` is readable only by one **uid** (not an email claim — see the comment block in `database.rules.json` for why that distinction matters) and writable by nobody. The page never writes; the server writes through the admin SDK, which bypasses rules.
+- **The rendered page.** Pre-auth the document region is empty: no heading, no section labels, no placeholder rows, no description. The header is injected by `render()` and only after a successful read, so a visitor who is signed out — or signed in as someone else — gets a blank page and a sign-in button, not the shape of a document with its contents withheld.
+- **Search.** `noindex,nofollow,noarchive,nosnippet`, plus `referrer: no-referrer` so subresource requests (fonts, the Firebase SDK) do not hand the URL to Google in a `Referer` header.
+
+### What is NOT protected, and cannot be while it is on Pages
+
+**The HTML source is public.** `view-source:` shows every section label, the description of what the record is, the RTDB node name and the Firebase config. Emptying the DOM removes the shape from a *casual* visitor; it removes nothing from anyone who looks. The repo being public means the file is also readable on github.com and via code search regardless of any meta tag.
+
+**A `robots.txt` would not help.** On a GitHub Pages *project* site, `robots.txt` at the repo root serves at `/morning-walks/robots.txt`, and crawlers only honour the one at the domain root (`rckdo.github.io/robots.txt`), which this repo does not control. The `noindex` meta tag is the only lever that works here. Do not add a robots.txt and think it has done something.
+
+**Nothing may link to the page.** `noindex` stops indexing; an inbound link is still a discovery path for anything that follows links. Checked and clean as of the audit: the board (`index.html`), `desk.html` and `manifest.webmanifest` do not reference it, and there is no README. This file used to print the live URL in §5 and no longer does. **Do not add it back**, here or anywhere else committed.
+
+The only fix for the source-exposure line is to stop serving the page from Pages — see §4c.
+
+### The Firebase web API key is not a leak
+
+`apiKey: "AIza…"` in the page source is fine and always was. Firebase web API keys are public by design — they identify the project, they do not authorise anything. The database rules are the control. Do not spend worry here; spend it on §4d.
+
+---
+
+## 4c. Options for taking the page off GitHub Pages (assessed, not built)
+
+The goal: the HTML itself is not world-readable, not just the data. Four routes, cheapest first.
+
+| Option | What it takes | Trade-off |
+|---|---|---|
+| **A. Serve from the existing Cloud Run service** | Add a route to `walk-mcp/server.js` that returns the HTML, gated on a verified Firebase ID token. The page bootstraps from a tiny public stub that signs in, then fetches the real HTML with the token attached. | Least new infrastructure — the service already exists and already runs. But the stub is still public, so *something* is still served to anyone; you have moved the labels behind auth, not the existence of the page. |
+| **B. Cloud Run + IAP or an auth proxy in front** | Put Identity-Aware Proxy (or a signed-cookie proxy) ahead of the service so unauthenticated requests never reach it. | The strongest of these: an anonymous request gets a Google login wall, not a byte of your HTML. Costs an IAP/load-balancer setup, which is more moving parts than everything else in this system combined, and a load balancer has a standing monthly cost. |
+| **C. Move the page to a private repo, deploy to Firebase Hosting** | Firebase Hosting serves it; the source lives in a private repo. | Hosting is still public by default, so this fixes source-on-GitHub but **not** page-on-the-internet. Only worth it combined with A. |
+| **D. Stop serving a page at all** | Read the record through the Strategy chat, which already has `get_strategy`. | Free, immediate, total. You lose the thing you asked for — a page to consult — and that was the point of building it. |
+
+**Recommendation when you want to act on this: A, and be honest that it is a partial.** It removes the labels and the description from public view, which is the actual exposure, at the cost of one route and a token check. B is the only complete answer and is disproportionate to a single private document — unless the record grows into something you would genuinely mind a stranger reading the *structure* of.
+
+A worthwhile half-step under any option: move the section labels and standing description **into the RTDB document**, so the HTML is a generic renderer that says nothing about what it renders. Cheap, and it shrinks what view-source gives away even on Pages.
+
+---
+
+## 4d. The MCP capability secret is in this public repo — highest-priority finding
+
+`walk-mcp/server.js` hardcodes `SECRET = "wR7kPm2ZqXv9TnE4bYcH8dLsJ3fA"`, and the MCP endpoint is `/mcp/<SECRET>`. That string is the **entire** authentication on the endpoint, and it is committed to a public repository.
+
+Anyone holding it plus the Cloud Run service URL gets full read **and write** on the board and the strategy record — through the admin SDK, which **bypasses the database rules completely**. Uid-scoping `/strategyReference` does nothing against this path.
+
+The only thing standing in the way today is that the service URL is not written down anywhere public. That is obscurity of one component, protecting a credential that has none.
+
+Remediation, in order:
+
+1. Read the secret from `process.env.MCP_SECRET` with **no fallback** — the service should refuse to start rather than serve on a compromised default.
+2. Set the env var on the Cloud Run service to a **newly generated** value. The committed one is burned; rotating is the point.
+3. Update the connector's URL in the Claude client to the new path.
+4. Leave the *shape* documented (`/mcp/<SECRET>`) — the shape is harmless, the value is not.
+
+Steps 2 and 3 take the connector down for the minute between them, which is why this is written up rather than already done.
+
+Git history keeps the old value forever, so rotation — not deletion — is the fix.
+
+---
+
 ## 5. Repo / infrastructure quick facts
 
 - **GitHub user:** `rckdo`
 - **Repo:** `morning-walks` (GitHub Pages serves the desk app `index.html` from the root)
 - **Server folder:** `walk-mcp/` inside that repo — holds `server.js`, deployed to Cloud Run
 - **Desk app (live):** https://rckdo.github.io/morning-walks/
-- **Strategy page (live):** https://rckdo.github.io/morning-walks/strategy/ — read-only, separate node, see §4a
+- **Strategy page:** served from this repo under `strategy/`. **The live URL is deliberately not written down here** — see §4b. Anyone who needs it either knows it or can derive it from the path, but a public file should not hand it over, and this line used to.
 - **Repo is PUBLIC.** Everything committed is world-readable. Nothing from the strategy record goes in it.
 - **Firebase RTDB node:** `walkReference`. Full snapshots archive under `walkReferenceHistory` (capped at 20), patch deltas under `walkReferenceOps` (capped at 200), each with a small `…Index` sibling used for pruning. Rules live in `database.rules.json` at the repo root — see §3b; a Firebase data export never contains them.
 - **Server deploys via Cloud Run** using Application Default Credentials — no key file needed when deployed inside the project.
