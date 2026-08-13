@@ -161,12 +161,30 @@ Archive keys are timestamps nudged forward on collision, so two writes in the sa
 
 ---
 
+## 4a. The strategy record — a second document on the same server (v118)
+
+`/strategyReference` is the strategic observations page: durable structural observations with dated evidence under each. **It is not part of the board.** Tools: `get_strategy`, `patch_strategy`, `update_strategy`, on the same MCP endpoint, so the connector already installed serves both.
+
+- **Why a separate node.** The two documents have opposite clocks. The board turns over daily and must be current; this accumulates for years and must hold a pattern still. On the same node the daily compile would eventually eat the durable record.
+- **Two tiers, and the split is the design.** `observations[]` are settled and general; `scratch[]` is a pad anything can be thrown at. `appendScratch` is free and constant. `ingest` (evidence onto an observation + drop the pad item, atomically) happens **only on Richard's explicit go-ahead**. Do not ingest because the pad looks full.
+- **Evidence is deletable** — `removeEvidence`, `removeSolution` — unlike the board's notes, which are append-only. Deliberate: the ingest step is also an editing step.
+- **Evidence dates are free text** ("Ongoing", "c. 2024–25", "w/c 10/08/2026"). `confirm: true` renders as `[confirm]` until verified with `setEvidence`.
+- **The page writes nothing.** `strategy/index.html` is read-only, so the rules grant read and no write at all. Nothing to add when a field is added — there is no desk-owned field here.
+- **Archive:** `strategyReferenceHistory` (full snapshots, capped 20) and `strategyReferenceOps` (patch deltas, capped 200), same pruning mechanism as the board.
+- **Seeding:** `get_strategy` returns `EMPTY` until the node exists. The seed document is **not in the repo** (see below) — pass it to `update_strategy` from wherever Richard keeps it. Ids, letters and `state` are backfilled server-side.
+
+**The exposure rule, and it is the important one.** `morning-walks` is a **public** repository — GitHub Pages serves it, so anything committed is world-readable. The content of this record is candid assessment of colleagues. **No observation, evidence item, scratch item or seed file is ever committed.** The page, the server, the rules and the skill are committed; the record itself lives only in RTDB, behind Richard's Google account. `strategy/seed.json` is in `.gitignore` so a copy dropped into the repo cannot be committed by accident. If you find yourself writing this content to a file inside the repo, stop.
+
+---
+
 ## 5. Repo / infrastructure quick facts
 
 - **GitHub user:** `rckdo`
 - **Repo:** `morning-walks` (GitHub Pages serves the desk app `index.html` from the root)
 - **Server folder:** `walk-mcp/` inside that repo — holds `server.js`, deployed to Cloud Run
 - **Desk app (live):** https://rckdo.github.io/morning-walks/
+- **Strategy page (live):** https://rckdo.github.io/morning-walks/strategy/ — read-only, separate node, see §4a
+- **Repo is PUBLIC.** Everything committed is world-readable. Nothing from the strategy record goes in it.
 - **Firebase RTDB node:** `walkReference`. Full snapshots archive under `walkReferenceHistory` (capped at 20), patch deltas under `walkReferenceOps` (capped at 200), each with a small `…Index` sibling used for pruning. Rules live in `database.rules.json` at the repo root — see §3b; a Firebase data export never contains them.
 - **Server deploys via Cloud Run** using Application Default Credentials — no key file needed when deployed inside the project.
 - **After editing `walk-mcp/server.js`:** commit → Cloud Run redeploys. Rules/app changes are separate.

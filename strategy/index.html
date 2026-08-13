@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<!--
+  STRATEGIC OBSERVATIONS
+  v1.0 — 13/08/2026
+
+  A deliberately simpler page than the desk. Headings, tables and prose. No
+  widgets, no dashboards, no charts, no drag-and-drop, and — unlike the desk —
+  no writes at all. Everything here is authored by Claude through the MCP
+  server (get_strategy / patch_strategy / update_strategy against
+  /strategyReference); this page only reads.
+
+  That read-only-ness is the point rather than a shortcut. The value of the
+  record is that observations stay general and evidence stays dated, and both
+  of those survive by being written deliberately in conversation, not typed
+  into a box in a hurry. Capture happens on the scratch pad, in a Strategy
+  chat. This page is where you come to see what has accumulated.
+
+  Access: the underlying node is readable only by Richard's Google account
+  (see database.rules.json). This HTML is public — GitHub Pages serves the
+  whole repo — but the content behind it is not, and no observation text is
+  ever committed to the repo.
+-->
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Strategic observations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#F3F5F7; --ink:#21252B; --faint:#5C6470; --hairline:#D6DBE0;
+    --amber:#A8620D; --white:#FFFFFF; --rule:#B8BFC7;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{background:var(--paper);color:var(--ink);font-family:'IBM Plex Sans',sans-serif;
+    line-height:1.6;min-height:100vh;padding:0 20px 96px}
+  .wrap{max-width:720px;margin:0 auto}
+  .hidden{display:none}
+
+  header{padding:36px 0 16px;border-bottom:1px solid var(--ink);margin-bottom:32px}
+  h1{font-family:'Fraunces',serif;font-weight:600;font-size:1.7rem;letter-spacing:-0.01em}
+  .stamp{font-family:'IBM Plex Mono',monospace;font-size:0.78rem;color:var(--faint);margin-top:6px}
+  .standing{font-size:0.93rem;color:var(--faint);margin-top:14px;max-width:60ch}
+
+  h2{font-family:'Fraunces',serif;font-weight:600;font-size:1.15rem;margin:44px 0 4px;
+    padding-bottom:6px;border-bottom:1px solid var(--rule)}
+  h2 .tier{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;font-weight:400;
+    color:var(--faint);letter-spacing:0.04em;text-transform:uppercase;display:block;margin-bottom:3px}
+  .tier-note{font-size:0.86rem;color:var(--faint);margin:8px 0 22px;max-width:62ch}
+
+  .obs{margin:30px 0 0;padding-bottom:26px;border-bottom:1px solid var(--hairline)}
+  .obs:last-child{border-bottom:none}
+  .obs h3{font-family:'Fraunces',serif;font-weight:600;font-size:1.05rem;line-height:1.35}
+  .obs h3 .letter{color:var(--faint);font-weight:400}
+  .obs .diagnosis{margin-top:8px;max-width:64ch}
+  .obs.retired{opacity:0.62}
+  .obs.retired h3::after{content:' — retired';font-family:'IBM Plex Mono',monospace;
+    font-size:0.7rem;color:var(--faint);letter-spacing:0.04em;text-transform:uppercase}
+
+  table{width:100%;border-collapse:collapse;margin-top:16px;font-size:0.92rem}
+  th{text-align:left;font-family:'IBM Plex Mono',monospace;font-size:0.7rem;font-weight:500;
+    letter-spacing:0.05em;text-transform:uppercase;color:var(--faint);
+    padding:0 12px 6px 0;border-bottom:1px solid var(--rule)}
+  td{padding:9px 12px 9px 0;border-bottom:1px solid var(--hairline);vertical-align:top}
+  td:last-child,th:last-child{padding-right:0}
+  /* The observation's own rule closes the block — a row border as well reads as
+     a doubled line with a gap in it. */
+  tbody tr:last-child td{border-bottom:none}
+  td.date{font-family:'IBM Plex Mono',monospace;font-size:0.8rem;color:var(--faint);
+    white-space:nowrap;width:1%}
+  .confirm{color:var(--amber);font-family:'IBM Plex Mono',monospace;font-size:0.72rem;
+    display:block;margin-top:2px}
+
+  .solutions{margin-top:18px;padding:14px 16px;background:var(--white);
+    border-left:2px solid var(--rule)}
+  .solutions h4{font-family:'IBM Plex Mono',monospace;font-size:0.7rem;font-weight:500;
+    letter-spacing:0.05em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+  .solutions li{list-style:none;font-size:0.92rem;margin-bottom:7px;max-width:62ch}
+  .solutions li:last-child{margin-bottom:0}
+  .solutions .brief{color:var(--faint);font-size:0.85rem}
+
+  .scratch li{list-style:none;padding:9px 0;border-bottom:1px solid var(--hairline);
+    display:flex;gap:14px;align-items:baseline}
+  .scratch .ts{font-family:'IBM Plex Mono',monospace;font-size:0.75rem;color:var(--faint);
+    white-space:nowrap}
+  .scratch .anchor{font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--amber)}
+  .empty{font-size:0.92rem;color:var(--faint);font-style:italic;padding:10px 0}
+
+  .questions p{margin-bottom:14px;max-width:64ch}
+  .questions .answer{color:var(--faint);font-size:0.92rem;margin-top:4px}
+  .questions .answered{opacity:0.7}
+
+  .panel{max-width:420px;margin:80px auto;text-align:center}
+  .panel p{color:var(--faint);margin-bottom:18px}
+  button{font-family:'IBM Plex Sans',sans-serif;font-size:0.95rem;padding:10px 20px;
+    background:var(--ink);color:var(--white);border:none;cursor:pointer}
+  button:hover{background:#000}
+  footer{margin-top:56px;padding-top:16px;border-top:1px solid var(--hairline);
+    font-family:'IBM Plex Mono',monospace;font-size:0.72rem;color:var(--faint)}
+</style>
+</head>
+<body>
+
+<div id="gate" class="panel hidden">
+  <p>Strategic observations. Private record.</p>
+  <button id="signin">Sign in</button>
+</div>
+
+<div id="loading" class="panel"><p>Loading…</p></div>
+
+<div id="error" class="panel hidden"><p id="errmsg"></p></div>
+
+<div id="doc" class="wrap hidden">
+  <header>
+    <h1>Strategic observations</h1>
+    <div class="stamp" id="stamp"></div>
+    <p class="standing">A record of durable structural observations about how the
+      organisation actually works, with dated evidence accumulating underneath each
+      one. It is a documentation of problems, not a list of fixes. Written in
+      conversation; this page only reads.</p>
+  </header>
+  <div id="tier1"></div>
+  <div id="tier2"></div>
+  <div id="tier3"></div>
+  <footer id="foot"></footer>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+  firebase.initializeApp({
+    apiKey: "AIzaSyA3ga4wTbLELE3jvrl40j7OclsYCt8PtIo",
+    authDomain: "morning-walks-42eb6.firebaseapp.com",
+    databaseURL: "https://morning-walks-42eb6-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "morning-walks-42eb6"
+  });
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"']/g,
+    c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const show = id => { ["gate","loading","error","doc"].forEach(x => $(x).classList.add("hidden"));
+    $(id).classList.remove("hidden"); };
+  // RTDB collapses sparse arrays into objects, so never assume Array here.
+  const asArray = v => Array.isArray(v) ? v : Object.values(v || {});
+
+  const fail = msg => { $("errmsg").textContent = msg; show("error"); };
+
+  $("signin").addEventListener("click", () =>
+    firebase.auth().signInWithPopup(new firebase.auth.GoogleAuthProvider())
+      .catch(e => fail("Sign-in failed: " + e.message)));
+
+  firebase.auth().onAuthStateChanged(user => {
+    if (!user) { show("gate"); return; }
+    show("loading");
+    firebase.database().ref("strategyReference").on("value",
+      snap => render(snap.val()),
+      err => fail(err.code === "PERMISSION_DENIED"
+        ? "This account doesn't have access to the strategy record."
+        : "Couldn't load: " + err.message));
+  });
+
+  /* ---------- rendering ----------
+     Dates on evidence are free text ("Ongoing", "c. 2024-25", "w/c 10/08/2026")
+     because that is the honest precision of most of it. Only the meta stamp and
+     scratch timestamps are real ISO dates, so only those get formatted. */
+
+  const fmtStamp = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? String(iso || "") : d.toLocaleString("en-GB",
+      { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  };
+  const fmtDay = iso => {
+    const d = new Date(iso);
+    return isNaN(d) ? String(iso || "") : d.toLocaleDateString("en-GB",
+      { day:"2-digit", month:"2-digit" });
+  };
+
+  function evidenceTable(evidence) {
+    if (!evidence.length) return '<p class="empty">No evidence logged yet.</p>';
+    return '<table><thead><tr><th>Date</th><th>Evidence</th></tr></thead><tbody>' +
+      evidence.map(e => '<tr><td class="date">' + esc(e.date || "Ongoing") +
+        (e.confirm ? '<span class="confirm">[confirm]</span>' : '') +
+        '</td><td>' + esc(e.text) + '</td></tr>').join("") +
+      '</tbody></table>';
+  }
+
+  function solutionsBlock(solutions) {
+    if (!solutions.length) return "";
+    return '<div class="solutions"><h4>Proposed solutions</h4><ul>' +
+      solutions.map(s => '<li>' + esc(s.text) +
+        (s.brief ? ' <span class="brief">— ' + esc(s.brief) + '</span>' : '') + '</li>').join("") +
+      '</ul></div>';
+  }
+
+  function observationBlock(o) {
+    return '<div class="obs' + (o.state === "retired" ? " retired" : "") + '">' +
+      '<h3><span class="letter">' + esc(o.letter || "?") + ' — </span>' + esc(o.title) + '</h3>' +
+      '<p class="diagnosis">' + esc(o.text) + '</p>' +
+      evidenceTable(asArray(o.evidence)) +
+      solutionsBlock(asArray(o.solutions)) +
+      '</div>';
+  }
+
+  function render(doc) {
+    if (!doc) {
+      fail("The strategy record is empty. Seed it with update_strategy in a Strategy chat.");
+      return;
+    }
+    const observations = asArray(doc.observations);
+    // Live first, retired kept below — the record never deletes an observation
+    // that stopped being true, it just stops leading with it.
+    const live = observations.filter(o => o.state !== "retired");
+    const retired = observations.filter(o => o.state === "retired");
+    const scratch = asArray(doc.scratch);
+    const questions = asArray(doc.questions);
+
+    $("stamp").textContent = "Last written " + fmtStamp(doc.meta && doc.meta.lastUpdated) +
+      " · " + live.length + " live observation" + (live.length === 1 ? "" : "s");
+
+    $("tier1").innerHTML =
+      '<h2><span class="tier">Tier 1</span>Observations</h2>' +
+      '<p class="tier-note">Settled. Each one is kept general — it should still be true' +
+      ' after the incident that prompted it has faded. Specifics belong in the evidence' +
+      ' table underneath.</p>' +
+      (live.length ? live.map(observationBlock).join("")
+                   : '<p class="empty">Nothing settled yet.</p>') +
+      (retired.length ? '<h2><span class="tier">Tier 1</span>Retired</h2>' +
+        retired.map(observationBlock).join("") : "");
+
+    $("tier2").innerHTML =
+      '<h2><span class="tier">Tier 2</span>Scratch pad</h2>' +
+      '<p class="tier-note">Uncommitted. Anything thrown here mid-conversation, waiting to be' +
+      ' folded up into an observation or dropped. Nothing on this list counts as part of the' +
+      ' record yet.</p>' +
+      (scratch.length
+        ? '<ul class="scratch">' + scratch.map(s =>
+            '<li><span class="ts">' + esc(fmtDay(s.ts)) + '</span><span>' + esc(s.text) +
+            (s.anchor ? ' <span class="anchor">#' + esc(s.anchor) + '</span>' : '') +
+            '</span></li>').join("") + '</ul>'
+        : '<p class="empty">Pad is clear.</p>');
+
+    $("tier3").innerHTML = !questions.length ? "" :
+      '<h2>Open questions</h2><div class="questions">' +
+      questions.map(q => '<p class="' + (q.state === "answered" ? "answered" : "") + '">' +
+        esc(q.text) +
+        (q.answer ? '<span class="answer"><br>' + esc(q.answer) + '</span>' : '') +
+        '</p>').join("") + '</div>';
+
+    $("foot").textContent = scratch.length
+      ? scratch.length + " item" + (scratch.length === 1 ? "" : "s") + " on the pad, not yet ingested."
+      : "Pad clear. Everything captured has been folded in or dropped.";
+
+    show("doc");
+  }
+</script>
+</body>
+</html>

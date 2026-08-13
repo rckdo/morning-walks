@@ -1,1 +1,7 @@
 node_modules/
+
+# The strategy record's content never enters this repo — it is public, and the
+# record is candid assessment of colleagues. The page and the plumbing are
+# committed; what they hold is not. See GOTCHAS.md §4a.
+strategy/seed.json
+strategy/*.seed.json

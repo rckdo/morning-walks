@@ -15,6 +15,12 @@
     "per child key: ref(action).update({done, status}) needs BOTH done and status",
     "granted, or the whole update is refused.",
     "",
+    "The strategy record (v1, 13/08/2026) is the strict case of the same rule:",
+    "readable by Richard, writable by nobody. Its page does not write at all —",
+    "every observation, every piece of evidence and every scratch item is",
+    "authored by Claude through the server. There is no field for the app to own,",
+    "so there is no line here to grant.",
+    "",
     "Deploy: paste into console -> Realtime Database -> Rules -> Publish",
     "(or firebase deploy --only database). This file is the source of record."
   ],
@@ -123,6 +129,11 @@
           ".write": "auth != null && auth.token.email === 'rckdorman@gmail.com'"
         }
       }
+    },
+
+    "strategyReference": {
+      ".read": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+      ".write": false
     },
 
     "apiUsage": {
