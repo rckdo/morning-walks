@@ -4,6 +4,18 @@
   v1.0 — 13/08/2026
 
   Changelog:
+  v1.1 — Reader mode. v1.0 rendered the whole document expanded — at 15k words
+         (heading for more) that is an endless scroll, and on a phone it is
+         unusable as a thing to CONSULT rather than read cover to cover.
+         Sections now render collapsed: number, title, status — one tappable
+         row each — and open in place. Which made the separate Contents block
+         redundant, so it is gone: the collapsed document IS the contents,
+         with the same rows in the same order and nothing to keep in step.
+         Cross-reference links open their target section before jumping to
+         it. Principles, the decisions log, closed threads and the facts
+         ledger fold the same way. Open all / Close all in the header for a
+         straight read-through; a fixed Top link for the way back. Open
+         state survives the live re-render a database write triggers.
   v1.0 — First build, against review/SPEC.md. Read-only render of /reviewStore:
          spine (thesis, principles, decisions log), contents, parts and
          sections in position order with numbers COMPUTED from position —
@@ -98,17 +110,33 @@
     white-space:nowrap;width:5.2em;flex-shrink:0}
   .decisions .why{color:var(--faint);font-style:italic}
 
-  /* Contents */
-  .toc{margin-top:18px}
-  .toc .part{margin-top:16px}
-  .toc a{text-decoration:none;display:flex;gap:14px;align-items:baseline;
-    padding:5px 0;border-bottom:1px solid var(--hairline)}
-  .toc a:last-child{border-bottom:none}
-  .toc .num{font-family:var(--sans);font-size:0.78rem;color:var(--faint);
-    width:2em;flex-shrink:0;text-align:right}
-  .toc .t{flex:1}
-  .toc .st{margin-left:auto;white-space:nowrap}
-  .toc .private-row .t{color:var(--faint);font-style:italic}
+  /* Folding. The document renders collapsed — one row per section — so the
+     closed state IS the contents page, and opening reads in place. Native
+     details/summary: no state to manage, works without a pointer. */
+  details>summary{list-style:none;cursor:pointer}
+  details>summary::-webkit-details-marker{display:none}
+  .sec>summary{position:relative;padding-right:30px}
+  .sec>summary::after{content:'+';position:absolute;right:2px;top:0;
+    font-family:var(--sans);font-size:1.05rem;color:var(--faint)}
+  .sec[open]>summary::after{content:'\2212'}
+
+  .fold{margin-top:16px}
+  .fold>summary{font-family:var(--sans);font-size:0.72rem;letter-spacing:0.1em;
+    text-transform:uppercase;color:var(--faint);padding:8px 0;
+    border-bottom:1px solid var(--hairline)}
+  .fold>summary::after{content:' +'}
+  .fold[open]>summary::after{content:' \2212'}
+
+  .ctrl{font-family:var(--sans);font-size:0.7rem;font-weight:400;letter-spacing:0.1em;
+    text-transform:uppercase;background:none;border:none;padding:0;
+    border-bottom:1px dotted var(--rule);color:var(--faint);cursor:pointer}
+  .ctrl:hover{background:none;color:var(--ink)}
+  .controls{margin-top:12px;display:flex;gap:22px}
+
+  .tocjump{position:fixed;right:14px;bottom:14px;font-family:var(--sans);
+    font-size:0.68rem;letter-spacing:0.12em;text-transform:uppercase;
+    color:var(--faint);text-decoration:none;background:var(--paper);
+    border:1px solid var(--rule);padding:8px 13px}
 
   /* The document */
   .part-head{margin-top:64px}
@@ -116,7 +144,9 @@
   .part-head h2{margin-top:0;font-size:1.28rem;letter-spacing:0;text-transform:none;
     border-bottom:2px solid var(--ink);padding-bottom:10px}
 
-  .sec{margin:44px 0 0;padding-bottom:38px;border-bottom:1px solid var(--hairline)}
+  /* Closed: a two-line row in a list. Open: a section of the manuscript. */
+  .sec{padding:16px 0;border-bottom:1px solid var(--hairline)}
+  .sec[open]{padding:22px 0 36px}
   .sec:last-child{border-bottom:none}
   .sec h3{font-weight:600;font-size:1.16rem;line-height:1.35}
   .sec h3 .num{color:var(--faint);font-weight:400}
@@ -195,7 +225,10 @@
   @media (max-width:520px){
     body{font-size:0.99rem;padding:0 18px 80px}
     header{padding-top:36px}
-    .toc .st{display:none}
+    /* Tighter vertical rhythm: on a phone the closed document should read as
+       one list, not a scroll of white space. */
+    h2{margin-top:40px}
+    .part-head{margin-top:44px}
     .decisions li{flex-direction:column;gap:2px}
     .decisions .ts{width:auto}
   }
@@ -221,11 +254,11 @@
 <div id="doc" class="wrap hidden">
   <header id="head"></header>
   <div id="spine"></div>
-  <div id="contents"></div>
   <div id="bodytext"></div>
   <div id="threads"></div>
   <div id="facts"></div>
   <footer id="foot"></footer>
+  <div id="jump"></div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -369,23 +402,26 @@
       '<div class="body">' + md(sub.body) + '</div></div>';
   }
 
+  // A closed section is a row in a list — number, title, status — which is
+  // why there is no separate contents block: this IS the contents, in the
+  // same order, with nothing to keep in step. Opening reads in place.
   function sectionBlock(s, refby) {
     const priv = s.visibility === "private";
     const sources = (refby[s.id] || []).map(id => numbering[id])
       .filter(n => n !== undefined).sort((a, b) => Number(a) - Number(b));
-    return '<div class="sec' + (priv ? ' private-block' : '') + '" id="x-' + esc(s.id) + '">' +
-      '<h3>' + (priv ? "" : '<span class="num">' + esc(numbering[s.id] || "") + '.&ensp;</span>') +
+    return '<details class="sec' + (priv ? ' private-block' : '') + '" id="x-' + esc(s.id) + '">' +
+      '<summary><h3>' + (priv ? "" : '<span class="num">' + esc(numbering[s.id] || "") + '.&ensp;</span>') +
       esc(s.title) + '</h3>' +
       '<div class="sec-meta">' + statusChip(s) +
         (s.lengthTarget ? '<span class="m">' + esc(s.lengthTarget) + '</span>' : "") +
-        (priv ? privateTag : "") + '</div>' +
+        (priv ? privateTag : "") + '</div></summary>' +
       (String(s.body || "").trim() ? '<div class="body">' + md(s.body) + '</div>'
         : '<p class="empty-note">Nothing drafted here yet.</p>') +
       byPos(asArray(s.subsections)).map(subBlock).join("") +
       (s.notes ? '<div class="notes"><span class="m">Drafting notes</span>' + esc(s.notes) + '</div>' : "") +
       (sources.length ? '<p class="refby">Referenced from ' +
         sources.map(n => '§' + esc(n)).join(", ") + '</p>' : "") +
-      '</div>';
+      '</details>';
   }
 
   function threadBlock(t) {
@@ -429,41 +465,41 @@
     sections.forEach(s => { const k = s.status || "empty"; counts[k] = (counts[k] || 0) + 1; });
     const open = threads.filter(t => !t.status || t.status === "open");
 
+    // A live write re-renders the page; whatever was open stays open.
+    const wasOpen = new Set(Array.from(document.querySelectorAll("details[open]"))
+      .map(d => d.id).filter(Boolean));
+
     // Header written here, not in the markup — the page has no title and no
     // shape until the read has actually come back.
     $("head").innerHTML =
-      '<h1>' + esc(spine.title || "Working draft") + '</h1>' +
+      '<h1 id="top">' + esc(spine.title || "Working draft") + '</h1>' +
       '<div class="stamp">Last written ' + esc(fmtStamp(doc.meta && doc.meta.lastUpdated)) +
       ' &nbsp;·&nbsp; ' + sections.length + ' section' + (sections.length === 1 ? "" : "s") +
       ' (' + ["refined", "drafted", "outlined", "empty"].filter(k => counts[k])
         .map(k => counts[k] + " " + k).join(", ") + ')' +
-      ' &nbsp;·&nbsp; ' + open.length + ' open thread' + (open.length === 1 ? "" : "s") + '</div>';
+      ' &nbsp;·&nbsp; ' + open.length + ' open thread' + (open.length === 1 ? "" : "s") + '</div>' +
+      '<div class="controls"><button class="ctrl" id="openall">Open all</button>' +
+      '<button class="ctrl" id="closeall">Close all</button></div>';
+    $("openall").onclick = () =>
+      document.querySelectorAll("details").forEach(d => { d.open = true; });
+    $("closeall").onclick = () =>
+      document.querySelectorAll("details").forEach(d => { d.open = false; });
 
     $("spine").innerHTML =
       '<h2>Spine</h2>' +
       (spine.thesis ? '<p class="thesis">' + esc(spine.thesis) + '</p>' : "") +
       (asArray(spine.principles).length ?
-        '<p class="section-note">The principles governing every section. Read before writing a word.</p>' +
+        '<details class="fold" id="fold-principles"><summary>Principles — ' +
+        asArray(spine.principles).length + ', governing every section</summary>' +
         '<ol class="principles">' + asArray(spine.principles).map(p =>
-          '<li>' + esc(p) + '</li>').join("") + '</ol>' : "") +
+          '<li>' + esc(p) + '</li>').join("") + '</ol></details>' : "") +
       (asArray(spine.decisions).length ?
-        '<p class="section-note">Decisions during drafting — what was cut, and why. Append-only.</p>' +
+        '<details class="fold" id="fold-decisions"><summary>Decisions during drafting — ' +
+        asArray(spine.decisions).length + ', append-only</summary>' +
         '<ul class="decisions">' + asArray(spine.decisions).map(d =>
           '<li><span class="ts">' + esc(fmtDay(d.ts)) + '</span><span>' + esc(d.what) +
           (d.why ? ' <span class="why">— ' + esc(d.why) + '</span>' : "") + '</span></li>').join("") +
-        '</ul>' : "");
-
-    $("contents").innerHTML = !sections.length ? "" :
-      '<h2>Contents</h2><div class="toc">' +
-      parts.map(part =>
-        '<div class="part"><span class="m">Part ' + esc(numbering[part.id]) + ' — ' +
-        esc(part.title) + '</span>' +
-        byPos(sections.filter(s => String(s.partId) === String(part.id))).map(s => {
-          const priv = s.visibility === "private";
-          return '<a href="#x-' + esc(s.id) + '"' + (priv ? ' class="private-row"' : "") + '>' +
-            '<span class="num">' + (priv ? "—" : esc(numbering[s.id])) + '</span>' +
-            '<span class="t">' + esc(s.title) + '</span>' + statusChip(s) + '</a>';
-        }).join("") + '</div>').join("") + '</div>';
+        '</ul></details>' : "");
 
     $("bodytext").innerHTML = parts.map(part => {
       const inPart = byPos(sections.filter(s => String(s.partId) === String(part.id)));
@@ -473,8 +509,8 @@
           : '<p class="empty-note">No sections in this part yet.</p>');
     }).join("");
 
-    // Open first; closure is a strike that stays — resolved and superseded
-    // threads are the audit trail, never deleted.
+    // Open first and always visible — they are the working state. Closure is
+    // a strike that stays, folded away but never deleted.
     const closed = threads.filter(t => t.status && t.status !== "open");
     $("threads").innerHTML = !threads.length ? "" :
       '<h2>Threads</h2>' +
@@ -483,15 +519,17 @@
       ' never a deletion.</p>' +
       (open.length ? open.map(threadBlock).join("") :
         '<p class="empty-note">Nothing open.</p>') +
-      closed.map(threadBlock).join("");
+      (closed.length ? '<details class="fold" id="fold-closed"><summary>Closed — ' +
+        closed.length + ', kept for the record</summary>' +
+        closed.map(threadBlock).join("") + '</details>' : "");
 
     $("facts").innerHTML = !facts.length ? "" :
       '<h2>Facts</h2>' +
-      '<p class="section-note">Each recurring figure lives here once and resolves into the' +
-      ' prose at render. Correcting one is one edit, everywhere.</p>' +
+      '<details class="fold" id="fold-facts"><summary>The ledger — ' + facts.length +
+      ' figure' + (facts.length === 1 ? "" : "s") + ', each living once, resolved into the prose at render</summary>' +
       '<table class="facts">' + facts.map(f =>
         '<tr><td class="val">' + esc(f.value) + '</td><td>' + esc(f.label || "") +
-        '</td><td class="slug">{{fact:' + esc(f.id) + '}}</td></tr>').join("") + '</table>';
+        '</td><td class="slug">{{fact:' + esc(f.id) + '}}</td></tr>').join("") + '</table></details>';
 
     const privCount = sections.filter(s => s.visibility === "private").length +
       threads.filter(t => t.visibility === "private").length;
@@ -500,9 +538,20 @@
       (privCount ? privCount + " private item" + (privCount === 1 ? "" : "s") +
         " held on the page, out of every export. " : "") +
       "Numbers on this page are computed, not stored — an export freezes them.";
+    $("jump").innerHTML = '<a class="tocjump" href="#top">Top</a>';
 
+    wasOpen.forEach(id => { const el = document.getElementById(id); if (el) el.open = true; });
     show("doc");
   }
+
+  // A link to a collapsed section (a cross-reference, a thread target) opens
+  // it before the jump, so the reader lands on prose, not on a closed row.
+  document.addEventListener("click", e => {
+    const a = e.target.closest("a[href^='#']");
+    if (!a) return;
+    const el = document.getElementById(a.getAttribute("href").slice(1));
+    if (el && el.tagName === "DETAILS") el.open = true;
+  });
 </script>
 </body>
 </html>
