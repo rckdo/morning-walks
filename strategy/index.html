@@ -49,8 +49,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow">
-<title>Strategic observations</title>
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+<!-- Every subresource request (fonts, the Firebase SDK) would otherwise carry
+     this page's URL to Google in a Referer header. It does not need to. -->
+<meta name="referrer" content="no-referrer">
+<!-- Deliberately says nothing. The tab title is the one piece of this page a
+     passer-by reads over your shoulder, and it used to name the document. -->
+<title>Private</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
@@ -204,24 +209,27 @@
 </head>
 <body>
 
+<!-- Nothing below says what this page is until the read succeeds. The gate is a
+     bare control, the loading state is blank, and the header is injected by
+     render() rather than sitting in the markup — so a visitor who is not signed
+     in, or is signed in as somebody else, gets an empty page rather than the
+     shape of a document with the contents withheld.
+
+     Be clear about what this does and does not buy. It removes the DOM, not the
+     source: the section labels and the description are still in the script below
+     and legible to anyone who opens view-source, because GitHub Pages serves
+     this file to the world. Only moving the page off Pages fixes that. -->
+
 <div id="gate" class="panel hidden">
-  <p>Strategic observations. Private record.</p>
   <button id="signin">Sign in</button>
 </div>
 
-<div id="loading" class="panel"><p>Loading…</p></div>
+<div id="loading" class="panel"></div>
 
 <div id="error" class="panel hidden"><p id="errmsg"></p></div>
 
 <div id="doc" class="wrap hidden">
-  <header>
-    <h1>Strategic observations</h1>
-    <div class="stamp" id="stamp"></div>
-    <p class="standing">A record of durable structural observations about how the
-      organisation actually works, with dated evidence accumulating underneath each
-      one. It is a documentation of problems, not a list of fixes. Written in
-      conversation; this page only reads.</p>
-  </header>
+  <header id="head"></header>
   <div id="tier1"></div>
   <div id="analysis"></div>
   <div id="tier2"></div>
@@ -338,8 +346,16 @@
     const scratch = asArray(doc.scratch);
     const questions = asArray(doc.questions);
 
-    $("stamp").textContent = "Last written " + fmtStamp(doc.meta && doc.meta.lastUpdated) +
-      " · " + live.length + " live observation" + (live.length === 1 ? "" : "s");
+    // The header is written here rather than in the markup so that the page has
+    // no title, no description and no shape until the read has actually come back.
+    $("head").innerHTML =
+      '<h1>Strategic observations</h1>' +
+      '<div class="stamp">Last written ' + esc(fmtStamp(doc.meta && doc.meta.lastUpdated)) +
+      ' · ' + live.length + ' live observation' + (live.length === 1 ? "" : "s") + '</div>' +
+      '<p class="standing">A record of durable structural observations about how the' +
+      ' organisation actually works, with dated evidence accumulating underneath each' +
+      ' one. It is a documentation of problems, not a list of fixes. Written in' +
+      ' conversation; this page only reads.</p>';
 
     $("tier1").innerHTML =
       '<h2><span class="tier">Tier 1</span>Observations</h2>' +

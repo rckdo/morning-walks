@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Walk Reference — Realtime Database rules. v118 (05/08/2026).",
+    "Walk Reference — Realtime Database rules. v119 (13/08/2026).",
     "",
     "Deny by default, then grant leaf by leaf. The boundary this enforces is the",
     "one the whole system rests on: CLAUDE AUTHORS, THE APP ANNOTATES. Claude-",
@@ -15,11 +15,26 @@
     "per child key: ref(action).update({done, status}) needs BOTH done and status",
     "granted, or the whole update is refused.",
     "",
-    "The strategy record (v1, 13/08/2026) is the strict case of the same rule:",
+    "The strategy record (v2, 13/08/2026) is the strict case of the same rule:",
     "readable by Richard, writable by nobody. Its page does not write at all —",
     "every observation, every piece of evidence and every scratch item is",
     "authored by Claude through the server. There is no field for the app to own,",
     "so there is no line here to grant.",
+    "",
+    "It is also the one node scoped by UID rather than by email claim, and the",
+    "difference matters. auth.token.email is only as trustworthy as the providers",
+    "enabled on the project: Google sign-in yields a verified address, but if",
+    "email/password or a custom-token provider is ever switched on, an attacker",
+    "can hold an UNVERIFIED email claim of any address and the rule passes. A uid",
+    "cannot be asserted — it is issued. The board's nodes still use the email form",
+    "and should be migrated the same way; they were left alone here only because",
+    "the desk app writes to a dozen of those paths and the change wants testing.",
+    "",
+    "The uid is committed rather than left as a placeholder, deliberately. It is",
+    "not a credential — it is an opaque identifier Firebase issues, and nobody can",
+    "assert it without a token this project signed. A rules file that does not",
+    "match production is the greater hazard: this file calls itself the source of",
+    "record, so the next person to paste it verbatim would lock the account out.",
     "",
     "Deploy: paste into console -> Realtime Database -> Rules -> Publish",
     "(or firebase deploy --only database). This file is the source of record."
@@ -132,7 +147,7 @@
     },
 
     "strategyReference": {
-      ".read": "auth != null && auth.token.email === 'rckdorman@gmail.com'",
+      ".read": "auth != null && auth.uid === 'RarEkDHiZYNV10oz3AkGZSjEbKl2'",
       ".write": false
     },
 
