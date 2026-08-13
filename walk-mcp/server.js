@@ -1,12 +1,50 @@
 /*
   POSTITPA — BOARD SERVER
-  v120.0 — 13/08/2026
+  v121.0 — 13/08/2026
   (Supersedes every earlier server file in this build — deploy this one.)
 
   This server reads and writes the board. It does not think. There is no
   model call in this file and no API key on the service.
 
   Changelog:
+  v121.0 — Third document: the review store (/reviewStore). A long, evolving
+           written document held as STRUCTURE — parts, sections, subsections,
+           threads, spine, facts — instead of as markdown files that describe
+           each other and have to be kept in sync by hand. One store, one
+           truth, no sync step. Full design: review/SPEC.md.
+
+           Three tools on the same server, so the connector Richard already
+           has serves all three documents: get_review, patch_review,
+           export_review.
+
+           The central decision (spec §3.1): NUMBERS ARE NEVER STORED. A
+           section's number is computed from its position at render time.
+           Inserting between positions 70 and 80 writes one row at 75 and
+           nothing else changes — no renumbering pass, no downstream edits,
+           no more "9a". Cross-references hold the target's id
+           ({{ref:sec_3}}) and resolve to the current number, so an insert
+           above the target cannot break them. Facts work the same way
+           ({{fact:matchdays}}): each recurring figure lives once and
+           resolves at render, so a correction is one write.
+
+           No hard delete anywhere — status transitions only, and every
+           write archives a delta (reviewStoreOps, capped 200). Exports
+           freeze their numbering: export_review stores the rendered
+           markdown plus the numbering as it stood (reviewStoreExports,
+           capped 20) and takes a full snapshot (reviewStoreHistory, capped
+           20), because "Section 7" means something to a reader holding a
+           copy and a later insert must not silently invalidate it. Private
+           material (visibility 'private' on sections, subsections and
+           threads) never enters an export and carries no number — so the
+           numbering on the page and the numbering in an export agree.
+
+           The store starts EMPTY and is seeded conversationally, by the
+           owner, through these tools — patch_review bootstraps the skeleton
+           on its first write. One divergence from the board's patch
+           behaviour, per the spec: a write carrying a stale
+           expectedLastUpdated is REFUSED here, not applied-and-flagged.
+           The board's patches are small annotations where applying to live
+           state is safe; a structural edit to a document is worth stopping.
   v120.0 — removeScratch. The pad had two exits and needed three: ingest
            promotes an item into an observation, clearScratch empties the lot,
            and there was no way to bin ONE piece of junk sitting among things
@@ -217,6 +255,16 @@ const SNODE = "strategyReference";
 const SHISTORY = "strategyReferenceHistory";
 const SOPS = "strategyReferenceOps";
 
+// The review store — the third document. A long written document held as
+// structure rather than as files, so nothing needs keeping in sync. Same
+// clock as the strategy record (accumulates; never turned over), same access
+// model (readable by one uid, writable only through here). See review/SPEC.md.
+const RNODE = "reviewStore";
+const RHISTORY = "reviewStoreHistory";
+const ROPS = "reviewStoreOps";
+const REXPORTS = "reviewStoreExports";
+const EXPORTS_KEEP = 20;
+
 // There is no API key here, and there must never be one again. This server
 // reads and writes the board; it does not think. Every judgement call is made
 // by Claude in a client Richard is actually talking to, on the subscription.
@@ -365,7 +413,7 @@ const archiveDelta = (board, operations, applied) =>
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "120.0" });
+  const server = new McpServer({ name: "walk-reference", version: "121.0" });
 
   server.tool(
     "get_reference",
@@ -1318,6 +1366,557 @@ function buildServer() {
     }
   );
 
+  /* ===================== Review store (the document) =====================
+     The third document. Shape (spec: review/SPEC.md):
+
+       parts[]    { id, position, title }
+       sections[] { id, position, partId, title, body, status, visibility,
+                    notes, lengthTarget,
+                    subsections[] { id, position, title, body, visibility } }
+       threads[]  { id, text, targets[], framing, status, resolution,
+                    resolvedTs, visibility }
+       spine      { title, thesis, principles[], decisions[] {ts, what, why} }
+       facts[]    { id, label, value, updated }
+       meta       { lastUpdated, updatedBy, counters }
+
+     Numbers are never stored — computed from position at render, here and in
+     review/index.html, identically. Ids are server-assigned off monotonic
+     counters and never reused, so an id in a {{ref:...}} marker or an old
+     export stays unambiguous forever. Positions are sparse (10, 20, 30…) and
+     go fractional on insert; nothing ever renumbers.
+
+     Visibility is a FIELD, not a convention: 'private' material renders only
+     to the owner on the window, carries no number, and never enters an
+     export. The numbering readers see is therefore the numbering exports
+     freeze. */
+
+  const RV_STATUSES = ["empty", "outlined", "drafted", "refined"];
+  const RV_VIS = ["include", "private"];
+  const RV_THREAD_STATES = ["open", "resolved", "superseded"];
+  const RV_REF = /\{\{ref:([A-Za-z0-9_-]+)\}\}/g;
+  const RV_FACT = /\{\{fact:([A-Za-z0-9_-]+)\}\}/g;
+
+  const emptyReview = () => ({
+    parts: [], sections: [], threads: [],
+    spine: { title: "", thesis: "", principles: [], decisions: [] },
+    facts: [],
+    meta: { counters: {} }
+  });
+
+  // Monotonic, never reused. The counter is belt-and-braces re-derived from
+  // the highest id actually present, so even a hand-restored snapshot with a
+  // stale counter cannot mint a duplicate.
+  const rvNextId = (doc, kind, prefix, lists) => {
+    doc.meta = doc.meta || {};
+    doc.meta.counters = doc.meta.counters || {};
+    let max = parseInt(doc.meta.counters[kind], 10) || 0;
+    lists.forEach(l => asArray(l).forEach(x => {
+      const m = new RegExp("^" + prefix + "_(\\d+)$").exec(String(x?.id || ""));
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+    }));
+    doc.meta.counters[kind] = max + 1;
+    return prefix + "_" + (max + 1);
+  };
+
+  const rvByPos = list => asArray(list).slice()
+    .sort((a, b) => (Number(a?.position) || 0) - (Number(b?.position) || 0));
+
+  // Position maths is the server's job — a caller names a sibling (after /
+  // before), never a number. Omit both to land at the end.
+  const rvPositionAmong = (siblings, o) => {
+    const list = rvByPos(siblings);
+    if (!list.length) return 10;
+    const at = id => {
+      const i = list.findIndex(x => String(x.id) === String(id));
+      if (i < 0) throw new Error("no sibling '" + id + "' to anchor on");
+      return i;
+    };
+    if (o.after) {
+      const i = at(o.after);
+      return i === list.length - 1 ? Number(list[i].position) + 10
+        : (Number(list[i].position) + Number(list[i + 1].position)) / 2;
+    }
+    if (o.before) {
+      const i = at(o.before);
+      return i === 0 ? Number(list[0].position) / 2
+        : (Number(list[i - 1].position) + Number(list[i].position)) / 2;
+    }
+    return Number(list[list.length - 1].position) + 10;
+  };
+
+  const rvParts = doc => asArray(doc.parts);
+  const rvSecs = doc => asArray(doc.sections);
+  const rvFindPart = (doc, id) => rvParts(doc).find(p => String(p?.id) === String(id)) || null;
+  const rvFindSection = (doc, id) => rvSecs(doc).find(s => String(s?.id) === String(id)) || null;
+  const rvFindSub = (doc, id) => {
+    for (const s of rvSecs(doc)) {
+      const sub = asArray(s.subsections).find(x => String(x?.id) === String(id));
+      if (sub) return { section: s, sub };
+    }
+    return null;
+  };
+  const rvFindThread = (doc, id) => asArray(doc.threads).find(t => String(t?.id) === String(id)) || null;
+  const rvSectionsOf = (doc, partId) =>
+    rvSecs(doc).filter(s => String(s?.partId) === String(partId));
+
+  // The one computation the whole design leans on. Private material is
+  // skipped, not numbered-then-hidden, so page and export always agree.
+  const rvNumbering = doc => {
+    const map = {};
+    let n = 0;
+    rvByPos(doc.parts).forEach((part, pi) => {
+      map[part.id] = String(pi + 1);
+      rvByPos(rvSectionsOf(doc, part.id)).forEach(s => {
+        if (s.visibility === "private") return;
+        map[s.id] = String(++n);
+        let m = 0;
+        rvByPos(asArray(s.subsections)).forEach(sub => {
+          if (sub.visibility === "private") return;
+          map[sub.id] = n + "." + (++m);
+        });
+      });
+    });
+    return map;
+  };
+
+  // Derived index: which sections point at a given target. Not stored —
+  // recomputed on read, which is what keeps it truthful.
+  const rvReferencedBy = doc => {
+    const idx = {};
+    const scan = (text, fromId) => {
+      let m;
+      RV_REF.lastIndex = 0;
+      while ((m = RV_REF.exec(String(text || "")))) {
+        const list = idx[m[1]] = idx[m[1]] || [];
+        if (!list.includes(fromId)) list.push(fromId);
+      }
+    };
+    rvSecs(doc).forEach(s => {
+      scan(s.body, s.id);
+      scan(s.notes, s.id);
+      asArray(s.subsections).forEach(sub => scan(sub.body, s.id));
+    });
+    asArray(doc.threads).forEach(t => scan(t.framing, t.id));
+    return idx;
+  };
+
+  const rvResolve = (text, doc, numbering) => String(text || "")
+    .replace(RV_REF, (_, id) => {
+      if (!rvFindSection(doc, id) && !rvFindSub(doc, id)) return "[unresolved reference: " + id + "]";
+      const num = numbering[id];
+      // The target exists but is private: a real authoring fault, surfaced
+      // loudly (an included body must not lean on omitted material) — but
+      // without printing the id into a document a reader might hold.
+      return num === undefined ? "[reference to private material]" : "§" + num;
+    })
+    .replace(RV_FACT, (_, id) => {
+      const f = asArray(doc.facts).find(x => String(x?.id) === String(id));
+      return f ? String(f.value) : "[unknown fact: " + id + "]";
+    });
+
+  // Markdown export: sections in position order, numbers computed, references
+  // and facts resolved, private material and drafting notes omitted. Threads
+  // are working state, not document body — they never export.
+  const rvExportMarkdown = (doc, numbering) => {
+    const lines = [];
+    const stamp = new Date().toLocaleDateString("en-GB",
+      { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Europe/London" });
+    lines.push("# " + ((doc.spine && doc.spine.title) || "Working document"), "");
+    lines.push("_Exported " + stamp + ". Numbering is frozen as it stood on this date; " +
+      "a later insert renumbers the live document, not this copy._", "");
+    rvByPos(doc.parts).forEach(part => {
+      const sections = rvByPos(rvSectionsOf(doc, part.id)).filter(s => s.visibility !== "private");
+      if (!sections.length) return;
+      lines.push("## Part " + numbering[part.id] + " — " + (part.title || ""), "");
+      sections.forEach(s => {
+        lines.push("### " + numbering[s.id] + ". " + (s.title || ""), "");
+        if (String(s.body || "").trim()) lines.push(rvResolve(s.body, doc, numbering).trim(), "");
+        rvByPos(asArray(s.subsections)).filter(x => x.visibility !== "private").forEach(sub => {
+          lines.push("#### " + numbering[sub.id] + " " + (sub.title || ""), "");
+          if (String(sub.body || "").trim()) lines.push(rvResolve(sub.body, doc, numbering).trim(), "");
+        });
+      });
+    });
+    return lines.join("\n");
+  };
+
+  const rvTouchedBefore = (doc, operations) => {
+    const ids = new Set();
+    operations.forEach(o => ["partId", "sectionId", "subsectionId", "threadId", "factId", "targetId"]
+      .forEach(k => { if (o && o[k]) ids.add(String(o[k])); }));
+    const before = {};
+    rvParts(doc).forEach(p => { if (ids.has(String(p?.id))) before[p.id] = p; });
+    rvSecs(doc).forEach(s => {
+      if (ids.has(String(s?.id))) before[s.id] = s;
+      asArray(s.subsections).forEach(x => { if (ids.has(String(x?.id))) before[x.id] = x; });
+    });
+    asArray(doc.threads).forEach(t => { if (ids.has(String(t?.id))) before[t.id] = t; });
+    asArray(doc.facts).forEach(f => { if (ids.has(String(f?.id))) before[f.id] = f; });
+    if (operations.some(o => o && ["update_spine", "add_decision"].includes(o.op)))
+      before._spine = doc.spine || null;
+    return before;
+  };
+
+  server.tool(
+    "get_review",
+    "Read the review store — the long written document held as structure (a THIRD document, separate from the Morning Walk board and the strategy record). Returns parts[], sections[] (each: id, position, partId, title, body markdown, status empty|outlined|drafted|refined, visibility include|private, notes, lengthTarget, subsections[]), threads[] (open questions and revision rules: text, targets[] of section ids, framing, status open|resolved|superseded, resolution), spine (title, thesis, principles[] read at the start of every session, decisions[] append-only log of what was cut and why), facts[] (recurring figures stored once, referenced as {{fact:id}}), meta. Plus _derived (computed, never stored): numbering — the number each part/section/subsection renders as right now — and referencedBy, which sections point at a given id via {{ref:id}} markers. NUMBERS ARE NEVER STORED; never write one into a body — reference sections as {{ref:<sectionId>}} and figures as {{fact:<factId>}}, resolved at render. At ~15k words the full read is cheap and is the normal way a session starts; pass sectionId to read just one section with its subsections, references resolved, and what points at it. Reads return meta.lastUpdated — pass it back to patch_review as expectedLastUpdated to guard structural edits.",
+    { sectionId: z.string().optional().describe("Read one section (with subsections, resolved references, and its referenced-by list) instead of the whole document") },
+    async ({ sectionId }) => {
+      const snap = await db.ref(RNODE).get();
+      if (!snap.exists()) return { content: [{ type: "text", text:
+        "EMPTY: /reviewStore does not exist yet. It is seeded conversationally, not imported — start with patch_review: insert_part for each part, then insert_section under it, with Richard adjudicating every conflict between the old files. The first write bootstraps the store." }] };
+      const doc = snap.val();
+      const numbering = rvNumbering(doc);
+      if (sectionId) {
+        const s = rvFindSection(doc, sectionId);
+        if (!s) return { content: [{ type: "text", text: "ERROR: section " + sectionId + " not found." }] };
+        return { content: [{ type: "text", text: JSON.stringify({
+          section: s,
+          _derived: {
+            number: numbering[s.id] || null,
+            referencedBy: (rvReferencedBy(doc)[s.id] || []),
+            resolvedBody: rvResolve(s.body, doc, numbering),
+            resolvedSubsections: rvByPos(asArray(s.subsections)).map(sub => ({
+              id: sub.id, number: numbering[sub.id] || null, title: sub.title,
+              resolvedBody: rvResolve(sub.body, doc, numbering)
+            }))
+          },
+          lastUpdated: doc.meta && doc.meta.lastUpdated
+        }, null, 2) }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(
+        { ...doc, _derived: { numbering, referencedBy: rvReferencedBy(doc) } }, null, 2) }] };
+    }
+  );
+
+  server.tool(
+    "patch_review",
+    "Write to the review store. The ONLY write path — there is no whole-document write and no hard delete anywhere; structure changes op by op, status transitions do the retiring, and every write archives a delta. The server owns id assignment and position maths: never supply an id or a position — name a sibling with after/before (section ids, e.g. after:'sec_3') or omit both to land at the end. The first write on an empty store bootstraps the skeleton, which is how seeding starts (insert_part, then insert_section). Ops, applied in order:\n" +
+    "STRUCTURE:\n" +
+    "  { op:'insert_part', title:'...', after:'part_1' }  — a new part (after/before optional)\n" +
+    "  { op:'update_part', partId:'part_1', title:'...' }\n" +
+    "  { op:'move_part', partId:'part_2', before:'part_1' }\n" +
+    "  { op:'insert_section', partId:'part_1', title:'...', after:'sec_7', body:'...', notes:'...', status:'outlined', visibility:'include', lengthTarget:'~600 words' }  — everything after partId+title optional; status defaults empty, visibility include. Inserting between two sections writes ONE row at a fractional position — nothing renumbers, every {{ref:...}} to every other section stays correct.\n" +
+    "  { op:'update_section', sectionId:'sec_7', title:'...', body:'...', notes:'...', lengthTarget:'...' }  — replaces the fields you pass; body is markdown; reference other sections as {{ref:<id>}} and figures as {{fact:<id>}}, NEVER as literal numbers (spec §3.3: storing references as text is the single most damaging thing to do here)\n" +
+    "  { op:'move_section', sectionId:'sec_7', after:'sec_2', partId:'part_2' }  — reposition; partId only to move it into a different part\n" +
+    "  { op:'insert_subsection', sectionId:'sec_7', title:'...', body:'...', after:'sub_3', visibility:'include' }  — the third semantic tier lives here as structure, never as heading syntax or bold run-ins inside a body\n" +
+    "  { op:'update_subsection', subsectionId:'sub_3', title:'...', body:'...' }\n" +
+    "  { op:'move_subsection', subsectionId:'sub_3', before:'sub_1' }  — within its section\n" +
+    "  { op:'set_status', sectionId:'sec_7', status:'drafted' }  — empty | outlined | drafted | refined\n" +
+    "  { op:'set_visibility', targetId:'sec_7', visibility:'private' }  — works on a section, subsection or thread id. Private material renders to the owner clearly marked, carries no number, and NEVER enters an export. This is the field for calibrations about named individuals — it is not a naming convention.\n" +
+    "THREADS — open questions, unresolved points, document-wide revision rules:\n" +
+    "  { op:'add_thread', text:'...', targets:['sec_7','sec_9'], framing:'...', visibility:'include' }  — targets are section ids; ZERO targets is valid and meaningful (a document-wide rule)\n" +
+    "  { op:'update_thread', threadId:'th_4', text:'...', targets:[...], framing:'...' }\n" +
+    "  { op:'resolve_thread', threadId:'th_4', resolution:'...', status:'resolved' }  — status resolved (default) or superseded. Resolution is a STATUS CHANGE, never a deletion: resolved threads stay, rendered below the open ones, and the resolution text is the audit trail.\n" +
+    "SPINE — the most valuable thing in the project; principles and thesis are read at the start of every session:\n" +
+    "  { op:'update_spine', title:'...', thesis:'...', principles:['...','...'] }  — replaces the fields you pass\n" +
+    "  { op:'add_decision', what:'...', why:'...' }  — the decisions log is APPEND-ONLY; what was cut and why, stamped by the server\n" +
+    "FACTS — each recurring figure lives once; correcting it is one write:\n" +
+    "  { op:'set_fact', factId:'matchdays', value:'72', label:'League matchdays per season' }  — factId is a slug you choose; reference it from bodies as {{fact:matchdays}}\n" +
+    "CONCURRENCY: pass expectedLastUpdated (from your read). If the store has moved since, the write is REFUSED — re-read and re-apply. Unlike the board's patch, nothing is applied on a stale read: these are structural edits to a document, worth stopping.",
+    {
+      ops: z.string().describe("JSON array of operation objects, applied in order (see tool description for shapes)"),
+      expectedLastUpdated: z.string().optional().describe("The meta.lastUpdated you read; the write is refused if the store has moved past it")
+    },
+    async ({ ops, expectedLastUpdated }) => {
+      let operations;
+      try { operations = JSON.parse(ops); }
+      catch (e) { return { content: [{ type: "text", text: "ERROR: invalid ops JSON — " + e.message }] }; }
+      if (!Array.isArray(operations) || !operations.length)
+        return { content: [{ type: "text", text: "ERROR: ops must be a non-empty JSON array." }] };
+
+      const snap = await db.ref(RNODE).get();
+      // Spec §4: writes carrying a stale read are refused, not merged.
+      const priorStamp = snap.exists() ? (snap.val()?.meta?.lastUpdated || "") : "";
+      if (expectedLastUpdated && priorStamp && priorStamp !== expectedLastUpdated) {
+        return { content: [{ type: "text", text:
+          "CONFLICT: the store moved since you read it (live meta.lastUpdated=" + priorStamp +
+          ", you expected " + expectedLastUpdated + "). Nothing written — re-read with get_review and re-apply." }] };
+      }
+      // The builder ships this empty; the owner's first insert is what creates
+      // the node. Bootstrapping here is deliberate, not defensive.
+      const doc = snap.exists() ? snap.val() : emptyReview();
+      doc.parts = asArray(doc.parts);
+      doc.sections = asArray(doc.sections);
+      doc.sections.forEach(s => { if (s) s.subsections = asArray(s.subsections); });
+      doc.threads = asArray(doc.threads);
+      doc.facts = asArray(doc.facts);
+      doc.spine = doc.spine || { title: "", thesis: "", principles: [], decisions: [] };
+      const now = new Date().toISOString();
+
+      const applied = [], errors = [];
+
+      operations.forEach((o, i) => {
+        try {
+          switch (o && o.op) {
+
+            case "insert_part": {
+              if (!o.title) { errors.push("op " + i + ": insert_part needs title"); break; }
+              const part = {
+                id: rvNextId(doc, "part", "part", [doc.parts]),
+                position: rvPositionAmong(doc.parts, o),
+                title: String(o.title)
+              };
+              doc.parts.push(part);
+              applied.push("part+ " + part.id + " @" + part.position);
+              break;
+            }
+
+            case "update_part": {
+              const p = rvFindPart(doc, o.partId);
+              if (!p) { errors.push("op " + i + ": part " + o.partId + " not found"); break; }
+              if (!o.title) { errors.push("op " + i + ": update_part needs title"); break; }
+              p.title = String(o.title);
+              applied.push("part~ " + p.id);
+              break;
+            }
+
+            case "move_part": {
+              const p = rvFindPart(doc, o.partId);
+              if (!p) { errors.push("op " + i + ": part " + o.partId + " not found"); break; }
+              p.position = rvPositionAmong(doc.parts.filter(x => x !== p), o);
+              applied.push("part> " + p.id + " @" + p.position);
+              break;
+            }
+
+            case "insert_section": {
+              if (!o.partId || !o.title) { errors.push("op " + i + ": insert_section needs partId+title"); break; }
+              if (!rvFindPart(doc, o.partId)) { errors.push("op " + i + ": part " + o.partId + " not found"); break; }
+              const s = {
+                id: rvNextId(doc, "section", "sec", [doc.sections]),
+                position: rvPositionAmong(rvSectionsOf(doc, o.partId), o),
+                partId: String(o.partId),
+                title: String(o.title),
+                body: String(o.body || ""),
+                status: RV_STATUSES.includes(o.status) ? o.status : "empty",
+                visibility: RV_VIS.includes(o.visibility) ? o.visibility : "include",
+                subsections: []
+              };
+              if (o.notes) s.notes = String(o.notes);
+              if (o.lengthTarget) s.lengthTarget = String(o.lengthTarget);
+              doc.sections.push(s);
+              applied.push("section+ " + s.id + " @" + o.partId + "/" + s.position);
+              break;
+            }
+
+            case "update_section": {
+              const s = rvFindSection(doc, o.sectionId);
+              if (!s) { errors.push("op " + i + ": section " + o.sectionId + " not found"); break; }
+              if (o.title !== undefined) s.title = String(o.title);
+              if (o.body !== undefined) s.body = String(o.body);
+              if (o.notes !== undefined) { if (o.notes) s.notes = String(o.notes); else delete s.notes; }
+              if (o.lengthTarget !== undefined) { if (o.lengthTarget) s.lengthTarget = String(o.lengthTarget); else delete s.lengthTarget; }
+              applied.push("section~ " + s.id);
+              break;
+            }
+
+            case "move_section": {
+              const s = rvFindSection(doc, o.sectionId);
+              if (!s) { errors.push("op " + i + ": section " + o.sectionId + " not found"); break; }
+              const partId = o.partId ? String(o.partId) : s.partId;
+              if (!rvFindPart(doc, partId)) { errors.push("op " + i + ": part " + partId + " not found"); break; }
+              s.position = rvPositionAmong(rvSectionsOf(doc, partId).filter(x => x !== s), o);
+              s.partId = partId;
+              applied.push("section> " + s.id + " @" + partId + "/" + s.position);
+              break;
+            }
+
+            case "insert_subsection": {
+              const s = rvFindSection(doc, o.sectionId);
+              if (!s) { errors.push("op " + i + ": section " + o.sectionId + " not found"); break; }
+              if (!o.title) { errors.push("op " + i + ": insert_subsection needs title"); break; }
+              s.subsections = asArray(s.subsections);
+              const sub = {
+                id: rvNextId(doc, "subsection", "sub", doc.sections.map(x => x.subsections)),
+                position: rvPositionAmong(s.subsections, o),
+                title: String(o.title),
+                body: String(o.body || ""),
+                visibility: RV_VIS.includes(o.visibility) ? o.visibility : "include"
+              };
+              s.subsections.push(sub);
+              applied.push("subsection+ " + sub.id + " @" + s.id + "/" + sub.position);
+              break;
+            }
+
+            case "update_subsection": {
+              const hit = rvFindSub(doc, o.subsectionId);
+              if (!hit) { errors.push("op " + i + ": subsection " + o.subsectionId + " not found"); break; }
+              if (o.title !== undefined) hit.sub.title = String(o.title);
+              if (o.body !== undefined) hit.sub.body = String(o.body);
+              applied.push("subsection~ " + hit.sub.id);
+              break;
+            }
+
+            case "move_subsection": {
+              const hit = rvFindSub(doc, o.subsectionId);
+              if (!hit) { errors.push("op " + i + ": subsection " + o.subsectionId + " not found"); break; }
+              hit.sub.position = rvPositionAmong(
+                asArray(hit.section.subsections).filter(x => x !== hit.sub), o);
+              applied.push("subsection> " + hit.sub.id + " @" + hit.sub.position);
+              break;
+            }
+
+            case "set_status": {
+              const s = rvFindSection(doc, o.sectionId);
+              if (!s) { errors.push("op " + i + ": section " + o.sectionId + " not found"); break; }
+              if (!RV_STATUSES.includes(o.status)) { errors.push("op " + i + ": status must be empty|outlined|drafted|refined"); break; }
+              s.status = o.status;
+              applied.push("status " + s.id + "=" + o.status);
+              break;
+            }
+
+            case "set_visibility": {
+              if (!RV_VIS.includes(o.visibility)) { errors.push("op " + i + ": visibility must be include|private"); break; }
+              const target = rvFindSection(doc, o.targetId)
+                || (rvFindSub(doc, o.targetId) || {}).sub
+                || rvFindThread(doc, o.targetId);
+              if (!target) { errors.push("op " + i + ": no section, subsection or thread " + o.targetId); break; }
+              target.visibility = o.visibility;
+              applied.push("visibility " + o.targetId + "=" + o.visibility);
+              break;
+            }
+
+            case "add_thread": {
+              if (!o.text) { errors.push("op " + i + ": add_thread needs text"); break; }
+              const targets = Array.isArray(o.targets) ? o.targets.map(String) : [];
+              const missing = targets.filter(id => !rvFindSection(doc, id));
+              if (missing.length) { errors.push("op " + i + ": unknown target section(s) " + missing.join(",")); break; }
+              const t = {
+                id: rvNextId(doc, "thread", "th", [doc.threads]),
+                text: String(o.text),
+                targets,
+                status: "open",
+                opened: now,
+                visibility: RV_VIS.includes(o.visibility) ? o.visibility : "include"
+              };
+              if (o.framing) t.framing = String(o.framing);
+              doc.threads.push(t);
+              applied.push("thread+ " + t.id + (targets.length ? "" : " (document-wide)"));
+              break;
+            }
+
+            case "update_thread": {
+              const t = rvFindThread(doc, o.threadId);
+              if (!t) { errors.push("op " + i + ": thread " + o.threadId + " not found"); break; }
+              if (o.text !== undefined) t.text = String(o.text);
+              if (Array.isArray(o.targets)) {
+                const targets = o.targets.map(String);
+                const missing = targets.filter(id => !rvFindSection(doc, id));
+                if (missing.length) { errors.push("op " + i + ": unknown target section(s) " + missing.join(",")); break; }
+                t.targets = targets;
+              }
+              if (o.framing !== undefined) { if (o.framing) t.framing = String(o.framing); else delete t.framing; }
+              applied.push("thread~ " + t.id);
+              break;
+            }
+
+            case "resolve_thread": {
+              const t = rvFindThread(doc, o.threadId);
+              if (!t) { errors.push("op " + i + ": thread " + o.threadId + " not found"); break; }
+              if (!o.resolution) { errors.push("op " + i + ": resolve_thread needs resolution — closure is written, never silent"); break; }
+              if (t.status !== "open") { errors.push("op " + i + ": thread " + t.id + " is already " + t.status); break; }
+              t.status = o.status === "superseded" ? "superseded" : "resolved";
+              t.resolution = String(o.resolution);
+              t.resolvedTs = now;
+              applied.push("thread " + t.id + "=" + t.status);
+              break;
+            }
+
+            case "update_spine": {
+              if (o.title === undefined && o.thesis === undefined && !Array.isArray(o.principles)) {
+                errors.push("op " + i + ": update_spine needs title, thesis or principles"); break;
+              }
+              if (o.title !== undefined) doc.spine.title = String(o.title);
+              if (o.thesis !== undefined) doc.spine.thesis = String(o.thesis);
+              if (Array.isArray(o.principles)) doc.spine.principles = o.principles.map(String);
+              applied.push("spine~");
+              break;
+            }
+
+            case "add_decision": {
+              if (!o.what) { errors.push("op " + i + ": add_decision needs what"); break; }
+              doc.spine.decisions = asArray(doc.spine.decisions);
+              const d = { ts: now, what: String(o.what) };
+              if (o.why) d.why = String(o.why);
+              doc.spine.decisions.push(d);
+              applied.push("decision+ (" + doc.spine.decisions.length + ")");
+              break;
+            }
+
+            case "set_fact": {
+              if (!o.factId || o.value === undefined) { errors.push("op " + i + ": set_fact needs factId+value"); break; }
+              if (!/^[a-z0-9][a-z0-9_-]*$/i.test(String(o.factId))) {
+                errors.push("op " + i + ": factId must be a slug (letters, digits, - _)"); break;
+              }
+              let f = asArray(doc.facts).find(x => String(x?.id) === String(o.factId));
+              if (!f) { f = { id: String(o.factId) }; doc.facts.push(f); }
+              f.value = String(o.value);
+              if (o.label !== undefined) { if (o.label) f.label = String(o.label); else delete f.label; }
+              f.updated = now;
+              applied.push("fact " + f.id + "=" + f.value);
+              break;
+            }
+
+            default:
+              errors.push("op " + i + ": unknown op '" + (o && o.op) + "'");
+          }
+        } catch (e) {
+          errors.push("op " + i + ": " + e.message);
+        }
+      });
+
+      if (!applied.length)
+        return { content: [{ type: "text", text: "ERROR: no operations applied. " + errors.join("; ") }] };
+
+      await remember(ROPS, archiveKey(), {
+        ts: now,
+        priorStamp,
+        applied: applied.slice(0, 40),
+        ops: operations.slice(0, 40),
+        before: snap.exists() ? rvTouchedBefore(snap.val(), operations) : {}
+      }, OPS_KEEP).catch(e => console.error("review archiveDelta failed", e));
+
+      doc.meta = doc.meta || {};
+      doc.meta.lastUpdated = now;
+      doc.meta.updatedBy = "claude";
+      await db.ref(RNODE).set(doc);
+
+      return { content: [{ type: "text", text:
+        "OK: review store patched at " + now + " — " + applied.join(", ") +
+        (errors.length ? " | SKIPPED: " + errors.join("; ") : "") +
+        " (delta archived)." }] };
+    }
+  );
+
+  server.tool(
+    "export_review",
+    "Render the document to markdown and FREEZE it: sections in position order, numbers computed from current positions, {{ref:...}} and {{fact:...}} resolved, private material and drafting notes and threads omitted. The rendered markdown, the date and the numbering as it stood are stored under /reviewStoreExports (newest " + EXPORTS_KEEP + " kept), and a full snapshot of the store is archived — because once a copy has gone to a reader, 'Section 7' means something to a human holding it, and a later insert must renumber the live document without silently invalidating theirs. Returns the markdown. Optional label names the version (e.g. 'CEO draft 1').",
+    { label: z.string().optional().describe("Short name for this version, stored with the export record") },
+    async ({ label }) => {
+      const snap = await db.ref(RNODE).get();
+      if (!snap.exists()) return { content: [{ type: "text", text: "ERROR: /reviewStore is empty — nothing to export." }] };
+      const doc = snap.val();
+      const numbering = rvNumbering(doc);
+      const markdown = rvExportMarkdown(doc, numbering);
+      const now = new Date().toISOString();
+      const record = {
+        ts: now,
+        numbering,
+        markdown,
+        sections: rvSecs(doc).filter(s => s.visibility !== "private").length,
+        words: markdown.split(/\s+/).filter(Boolean).length
+      };
+      if (label) record.label = String(label);
+      await remember(REXPORTS, archiveKey(), record, EXPORTS_KEEP)
+        .catch(e => console.error("review export archive failed", e));
+      await remember(RHISTORY, archiveKey(), doc, HISTORY_KEEP)
+        .catch(e => console.error("review archiveFull failed", e));
+      return { content: [{ type: "text", text:
+        "OK: exported at " + now + (label ? " ('" + label + "')" : "") + " — " + record.sections +
+        " section(s), ~" + record.words + " words. Numbering frozen with the record.\n\n" + markdown }] };
+    }
+  );
+
   return server;
 }
 
@@ -1343,4 +1942,4 @@ app.get(PATH, (_req, res) => res.status(405).send("POST only"));
 app.get("/", (_req, res) => res.send("walk-reference MCP: ok"));
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log("postitpa board server v120 listening on " + port));
+app.listen(port, () => console.log("postitpa board server v121 listening on " + port));

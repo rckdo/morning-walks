@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Walk Reference — Realtime Database rules. v119 (13/08/2026).",
+    "Walk Reference — Realtime Database rules. v121 (13/08/2026).",
     "",
     "Deny by default, then grant leaf by leaf. The boundary this enforces is the",
     "one the whole system rests on: CLAUDE AUTHORS, THE APP ANNOTATES. Claude-",
@@ -20,6 +20,13 @@
     "every observation, every piece of evidence and every scratch item is",
     "authored by Claude through the server. There is no field for the app to own,",
     "so there is no line here to grant.",
+    "",
+    "The review store (v121, 13/08/2026) follows the strategy record exactly:",
+    "one uid may read, nobody may write, all writes go through the server's",
+    "admin SDK. Its window (review/index.html) only reads. This scoping is the",
+    "load-bearing security control for that document (review/SPEC.md §5) —",
+    "after deploying, verify it: signed out and signed in as any other account,",
+    "a read of /reviewStore must return permission_denied.",
     "",
     "It is also the one node scoped by UID rather than by email claim, and the",
     "difference matters. auth.token.email is only as trustworthy as the providers",
@@ -147,6 +154,11 @@
     },
 
     "strategyReference": {
+      ".read": "auth != null && auth.uid === 'RarEkDHiZYNV10oz3AkGZSjEbKl2'",
+      ".write": false
+    },
+
+    "reviewStore": {
       ".read": "auth != null && auth.uid === 'RarEkDHiZYNV10oz3AkGZSjEbKl2'",
       ".write": false
     },

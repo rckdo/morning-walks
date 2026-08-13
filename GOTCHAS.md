@@ -245,6 +245,24 @@ Git history keeps the old value forever, so rotation — not deletion — is the
 
 ---
 
+## 4e. The review store — a third document on the same server (v121)
+
+`/reviewStore` holds a long, evolving written document as **structure** — parts, sections, subsections, threads, spine, facts — instead of as files that describe each other and drift. Spec: `review/SPEC.md`. Window: `review/index.html` (read-only, authenticated, blank pre-auth — same posture as the strategy page). Tools on the same MCP endpoint: `get_review`, `patch_review`, `export_review`.
+
+The rules that make it work, and that a session must not break:
+
+- **Numbers are never stored.** A section's number is computed from its sparse `position` at render (server and window compute identically — `rvNumbering` in `server.js`, `numberingOf` in `review/index.html`; change one, change both). Never write a section number into a body.
+- **References are relations.** `{{ref:<sectionId>}}` in a body resolves to the target's current number; `{{fact:<factId>}}` resolves a figure stored once. Writing either as literal text is the single most damaging thing a session can do here (spec §3.3).
+- **No hard delete, no whole-document write.** Everything moves op by op through `patch_review`; threads close by status with a written resolution; every write archives a delta (`reviewStoreOps`, capped 200).
+- **Writes refuse on a stale read.** Unlike the board's patch (applies-and-flags), a `patch_review` carrying an out-of-date `expectedLastUpdated` is refused outright.
+- **Visibility is a field.** `private` sections/subsections/threads carry no number, render to the owner clearly marked, and never enter an export.
+- **Exports freeze numbering.** `export_review` stores the markdown, the date and the numbering as it stood (`reviewStoreExports`, capped 20) plus a full snapshot (`reviewStoreHistory`, capped 20).
+- **Seeding is conversational, not scripted.** The store ships empty; the first `patch_review` bootstraps it. The old files disagree with each other, so each conflict is adjudicated by Richard during the seed — do not bulk-import.
+
+**Exposure rule, same as the strategy record:** the repo is public; no document content is ever committed. `review/seed.json` and friends are gitignored. Access is uid-scoped read / no write in `database.rules.json` — deploy the rules and **verify the scoping before seeding** (signed out or as another account, `/reviewStore` must return `permission_denied`): it is the load-bearing control.
+
+---
+
 ## 5. Repo / infrastructure quick facts
 
 - **GitHub user:** `rckdo`
@@ -252,6 +270,7 @@ Git history keeps the old value forever, so rotation — not deletion — is the
 - **Server folder:** `walk-mcp/` inside that repo — holds `server.js`, deployed to Cloud Run
 - **Desk app (live):** https://rckdo.github.io/morning-walks/
 - **Strategy page:** served from this repo under `strategy/`. **The live URL is deliberately not written down here** — see §4b. Anyone who needs it either knows it or can derive it from the path, but a public file should not hand it over, and this line used to.
+- **Review window:** served from this repo under `review/` — same rule, the URL is derivable from the path and not written down. Nodes: `reviewStore`, with `reviewStoreOps` / `reviewStoreExports` / `reviewStoreHistory` archives (each with an `…Index` sibling for pruning). See §4e.
 - **Repo is PUBLIC.** Everything committed is world-readable. Nothing from the strategy record goes in it.
 - **Firebase RTDB node:** `walkReference`. Full snapshots archive under `walkReferenceHistory` (capped at 20), patch deltas under `walkReferenceOps` (capped at 200), each with a small `…Index` sibling used for pruning. Rules live in `database.rules.json` at the repo root — see §3b; a Firebase data export never contains them.
 - **Server deploys via Cloud Run** using Application Default Credentials — no key file needed when deployed inside the project.
