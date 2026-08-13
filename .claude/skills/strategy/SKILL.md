@@ -30,7 +30,9 @@ It is a **different document from the board**. The board turns over daily and it
 
 1. **On session start:** call `get_strategy` and present the current state before discussing anything. Live observations, what is on the pad, anything still flagged `[confirm]`.
 2. **During the session:** `appendScratch` freely. Once, midday, six times, whenever. It is cheap and low-ceremony and **never needs permission** — the point is that nothing is lost in the moment.
-3. **On explicit go-ahead only:** ingest. Sort pad items up into existing observations as new evidence (`ingest`), promote one to a new observation only if genuinely distinct (`addObservation`), then `clearScratch`.
+3. **On explicit go-ahead only:** ingest. Sort pad items up into existing observations as new evidence (`ingest`), promote one to a new observation only if genuinely distinct (`addObservation`), bin anything not worth keeping with `removeScratch`, then `clearScratch`.
+
+**Never ingest something just to get it off the pad.** If an item doesn't belong under any observation, `removeScratch` it — filing junk somewhere it doesn't fit corrupts the record the pad exists to protect. Binning one item is cheap and reversible from the archive; a wrong evidence row sits there looking authoritative.
 
 Never ingest because the pad looks full or the session is ending. "Fold that in", "commit it", "ingest" — an actual instruction, or nothing moves.
 
