@@ -7,6 +7,12 @@
   model call in this file and no API key on the service.
 
   Changelog:
+  v121.1 — Vocabulary. The review tools called the document "the store" in
+           every description and reply, and chats picked the word up from the
+           connector. It is THE DOCUMENT (the board is the board; the strategy
+           page is the record). Wording only — tool names, node paths and
+           behaviour untouched. Node stays /reviewStore: paths are plumbing,
+           not vocabulary.
   v121.0 — Third document: the review store (/reviewStore). A long, evolving
            written document held as STRUCTURE — parts, sections, subsections,
            threads, spine, facts — instead of as markdown files that describe
@@ -413,7 +419,7 @@ const archiveDelta = (board, operations, applied) =>
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "121.0" });
+  const server = new McpServer({ name: "walk-reference", version: "121.1" });
 
   server.tool(
     "get_reference",
@@ -1559,12 +1565,12 @@ function buildServer() {
 
   server.tool(
     "get_review",
-    "Read the review store — the long written document held as structure (a THIRD document, separate from the Morning Walk board and the strategy record). Returns parts[], sections[] (each: id, position, partId, title, body markdown, status empty|outlined|drafted|refined, visibility include|private, notes, lengthTarget, subsections[]), threads[] (open questions and revision rules: text, targets[] of section ids, framing, status open|resolved|superseded, resolution), spine (title, thesis, principles[] read at the start of every session, decisions[] append-only log of what was cut and why), facts[] (recurring figures stored once, referenced as {{fact:id}}), meta. Plus _derived (computed, never stored): numbering — the number each part/section/subsection renders as right now — and referencedBy, which sections point at a given id via {{ref:id}} markers. NUMBERS ARE NEVER STORED; never write one into a body — reference sections as {{ref:<sectionId>}} and figures as {{fact:<factId>}}, resolved at render. At ~15k words the full read is cheap and is the normal way a session starts; pass sectionId to read just one section with its subsections, references resolved, and what points at it. Reads return meta.lastUpdated — pass it back to patch_review as expectedLastUpdated to guard structural edits.",
+    "Read the review document — the department's long working document held as structure (a THIRD document, separate from the Morning Walk board and the strategy record). Call it THE DOCUMENT or THE REVIEW in conversation — never 'the store'. Returns parts[], sections[] (each: id, position, partId, title, body markdown, status empty|outlined|drafted|refined, visibility include|private, notes, lengthTarget, subsections[]), threads[] (open questions and revision rules: text, targets[] of section ids, framing, status open|resolved|superseded, resolution), spine (title, thesis, principles[] read at the start of every session, decisions[] append-only log of what was cut and why), facts[] (recurring figures stored once, referenced as {{fact:id}}), meta. Plus _derived (computed, never stored): numbering — the number each part/section/subsection renders as right now — and referencedBy, which sections point at a given id via {{ref:id}} markers. NUMBERS ARE NEVER STORED; never write one into a body — reference sections as {{ref:<sectionId>}} and figures as {{fact:<factId>}}, resolved at render. At ~15k words the full read is cheap and is the normal way a session starts; pass sectionId to read just one section with its subsections, references resolved, and what points at it. Reads return meta.lastUpdated — pass it back to patch_review as expectedLastUpdated to guard structural edits.",
     { sectionId: z.string().optional().describe("Read one section (with subsections, resolved references, and its referenced-by list) instead of the whole document") },
     async ({ sectionId }) => {
       const snap = await db.ref(RNODE).get();
       if (!snap.exists()) return { content: [{ type: "text", text:
-        "EMPTY: /reviewStore does not exist yet. It is seeded conversationally, not imported — start with patch_review: insert_part for each part, then insert_section under it, with Richard adjudicating every conflict between the old files. The first write bootstraps the store." }] };
+        "EMPTY: the review document has not been started yet. It is seeded conversationally, not imported — start with patch_review: insert_part for each part, then insert_section under it, with Richard adjudicating every conflict between the old files. The first write creates it." }] };
       const doc = snap.val();
       const numbering = rvNumbering(doc);
       if (sectionId) {
@@ -1591,7 +1597,7 @@ function buildServer() {
 
   server.tool(
     "patch_review",
-    "Write to the review store. The ONLY write path — there is no whole-document write and no hard delete anywhere; structure changes op by op, status transitions do the retiring, and every write archives a delta. The server owns id assignment and position maths: never supply an id or a position — name a sibling with after/before (section ids, e.g. after:'sec_3') or omit both to land at the end. The first write on an empty store bootstraps the skeleton, which is how seeding starts (insert_part, then insert_section). Ops, applied in order:\n" +
+    "Write to the review document. The ONLY write path — there is no whole-document write and no hard delete anywhere; structure changes op by op, status transitions do the retiring, and every write archives a delta. The server owns id assignment and position maths: never supply an id or a position — name a sibling with after/before (section ids, e.g. after:'sec_3') or omit both to land at the end. The first write on an empty document bootstraps the skeleton, which is how seeding starts (insert_part, then insert_section). Ops, applied in order:\n" +
     "STRUCTURE:\n" +
     "  { op:'insert_part', title:'...', after:'part_1' }  — a new part (after/before optional)\n" +
     "  { op:'update_part', partId:'part_1', title:'...' }\n" +
@@ -1613,10 +1619,10 @@ function buildServer() {
     "  { op:'add_decision', what:'...', why:'...' }  — the decisions log is APPEND-ONLY; what was cut and why, stamped by the server\n" +
     "FACTS — each recurring figure lives once; correcting it is one write:\n" +
     "  { op:'set_fact', factId:'matchdays', value:'72', label:'League matchdays per season' }  — factId is a slug you choose; reference it from bodies as {{fact:matchdays}}\n" +
-    "CONCURRENCY: pass expectedLastUpdated (from your read). If the store has moved since, the write is REFUSED — re-read and re-apply. Unlike the board's patch, nothing is applied on a stale read: these are structural edits to a document, worth stopping.",
+    "CONCURRENCY: pass expectedLastUpdated (from your read). If the document has moved since, the write is REFUSED — re-read and re-apply. Unlike the board's patch, nothing is applied on a stale read: these are structural edits to a document, worth stopping.",
     {
       ops: z.string().describe("JSON array of operation objects, applied in order (see tool description for shapes)"),
-      expectedLastUpdated: z.string().optional().describe("The meta.lastUpdated you read; the write is refused if the store has moved past it")
+      expectedLastUpdated: z.string().optional().describe("The meta.lastUpdated you read; the write is refused if the document has moved past it")
     },
     async ({ ops, expectedLastUpdated }) => {
       let operations;
@@ -1630,7 +1636,7 @@ function buildServer() {
       const priorStamp = snap.exists() ? (snap.val()?.meta?.lastUpdated || "") : "";
       if (expectedLastUpdated && priorStamp && priorStamp !== expectedLastUpdated) {
         return { content: [{ type: "text", text:
-          "CONFLICT: the store moved since you read it (live meta.lastUpdated=" + priorStamp +
+          "CONFLICT: the document moved since you read it (live meta.lastUpdated=" + priorStamp +
           ", you expected " + expectedLastUpdated + "). Nothing written — re-read with get_review and re-apply." }] };
       }
       // The builder ships this empty; the owner's first insert is what creates
@@ -1882,7 +1888,7 @@ function buildServer() {
       await db.ref(RNODE).set(doc);
 
       return { content: [{ type: "text", text:
-        "OK: review store patched at " + now + " — " + applied.join(", ") +
+        "OK: review document patched at " + now + " — " + applied.join(", ") +
         (errors.length ? " | SKIPPED: " + errors.join("; ") : "") +
         " (delta archived)." }] };
     }
@@ -1890,11 +1896,11 @@ function buildServer() {
 
   server.tool(
     "export_review",
-    "Render the document to markdown and FREEZE it: sections in position order, numbers computed from current positions, {{ref:...}} and {{fact:...}} resolved, private material and drafting notes and threads omitted. The rendered markdown, the date and the numbering as it stood are stored under /reviewStoreExports (newest " + EXPORTS_KEEP + " kept), and a full snapshot of the store is archived — because once a copy has gone to a reader, 'Section 7' means something to a human holding it, and a later insert must renumber the live document without silently invalidating theirs. Returns the markdown. Optional label names the version (e.g. 'CEO draft 1').",
+    "Render the document to markdown and FREEZE it: sections in position order, numbers computed from current positions, {{ref:...}} and {{fact:...}} resolved, private material and drafting notes and threads omitted. The rendered markdown, the date and the numbering as it stood are stored under /reviewStoreExports (newest " + EXPORTS_KEEP + " kept), and a full snapshot of the document is archived — because once a copy has gone to a reader, 'Section 7' means something to a human holding it, and a later insert must renumber the live document without silently invalidating theirs. Returns the markdown. Optional label names the version (e.g. 'CEO draft 1').",
     { label: z.string().optional().describe("Short name for this version, stored with the export record") },
     async ({ label }) => {
       const snap = await db.ref(RNODE).get();
-      if (!snap.exists()) return { content: [{ type: "text", text: "ERROR: /reviewStore is empty — nothing to export." }] };
+      if (!snap.exists()) return { content: [{ type: "text", text: "ERROR: the review document is empty — nothing to export." }] };
       const doc = snap.val();
       const numbering = rvNumbering(doc);
       const markdown = rvExportMarkdown(doc, numbering);
