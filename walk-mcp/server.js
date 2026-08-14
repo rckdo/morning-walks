@@ -7,6 +7,26 @@
   model call in this file and no API key on the service.
 
   Changelog:
+  v122.0 — Safer writes on the review document. Five additions, specced and
+           acceptance-tested by the owner:
+           (1) patch_review batches are ATOMIC. One invalid op (unknown name,
+               bad id, missing field) refuses the WHOLE batch and nothing is
+               written — a document half-way through a structural edit is
+               worse than one that refused it. The refusal names every bad op.
+               Validation happens by applying the batch to the in-memory copy,
+               so ops that depend on earlier ops in the same batch still work.
+           (2) dryRun:true on patch_review — same validation, reports exactly
+               what would change, writes nothing, stamps nothing.
+           (3) Threads carry an optional supersedes[] of thread ids (add and
+               update, validated against real threads). A link, not an action:
+               the superseded thread is not auto-resolved.
+           (4) preview:true on export_review — a manifest of what would be
+               included versus withheld, by id, with nothing frozen or stored.
+           (5) reopen_thread — a resolved or superseded thread returns to
+               open; the prior resolution moves onto the thread's history[],
+               never erased. resolve_thread then works on it again.
+           Still no hard delete anywhere, and {{ref}}/{{fact}} remain the only
+           way to reference sections and figures.
   v121.1 — Vocabulary. The review tools called the document "the store" in
            every description and reply, and chats picked the word up from the
            connector. It is THE DOCUMENT (the board is the board; the strategy
@@ -419,7 +439,7 @@ const archiveDelta = (board, operations, applied) =>
 /* ============================== MCP tools ============================== */
 
 function buildServer() {
-  const server = new McpServer({ name: "walk-reference", version: "121.1" });
+  const server = new McpServer({ name: "walk-reference", version: "122.0" });
 
   server.tool(
     "get_reference",
@@ -1597,7 +1617,7 @@ function buildServer() {
 
   server.tool(
     "patch_review",
-    "Write to the review document. The ONLY write path — there is no whole-document write and no hard delete anywhere; structure changes op by op, status transitions do the retiring, and every write archives a delta. The server owns id assignment and position maths: never supply an id or a position — name a sibling with after/before (section ids, e.g. after:'sec_3') or omit both to land at the end. The first write on an empty document bootstraps the skeleton, which is how seeding starts (insert_part, then insert_section). Ops, applied in order:\n" +
+    "Write to the review document. The ONLY write path — there is no whole-document write and no hard delete anywhere; structure changes op by op, status transitions do the retiring, and every write archives a delta. The server owns id assignment and position maths: never supply an id or a position — name a sibling with after/before (section ids, e.g. after:'sec_3') or omit both to land at the end. The first write on an empty document bootstraps the skeleton, which is how seeding starts (insert_part, then insert_section). THE BATCH IS ATOMIC: every op must validate — one bad op refuses the whole batch and NOTHING is written, with every fault named in the reply. Pass dryRun:true to validate and see exactly what would change without writing or stamping anything. Ops, applied in order:\n" +
     "STRUCTURE:\n" +
     "  { op:'insert_part', title:'...', after:'part_1' }  — a new part (after/before optional)\n" +
     "  { op:'update_part', partId:'part_1', title:'...' }\n" +
@@ -1611,9 +1631,10 @@ function buildServer() {
     "  { op:'set_status', sectionId:'sec_7', status:'drafted' }  — empty | outlined | drafted | refined\n" +
     "  { op:'set_visibility', targetId:'sec_7', visibility:'private' }  — works on a section, subsection or thread id. Private material renders to the owner clearly marked, carries no number, and NEVER enters an export. This is the field for calibrations about named individuals — it is not a naming convention.\n" +
     "THREADS — open questions, unresolved points, document-wide revision rules:\n" +
-    "  { op:'add_thread', text:'...', targets:['sec_7','sec_9'], framing:'...', visibility:'include' }  — targets are section ids; ZERO targets is valid and meaningful (a document-wide rule)\n" +
-    "  { op:'update_thread', threadId:'th_4', text:'...', targets:[...], framing:'...' }\n" +
+    "  { op:'add_thread', text:'...', targets:['sec_7','sec_9'], framing:'...', visibility:'include', supersedes:['th_2'] }  — targets are section ids; ZERO targets is valid and meaningful (a document-wide rule). supersedes optional: records which thread(s) this one replaces — a link only, the superseded thread is NOT auto-resolved\n" +
+    "  { op:'update_thread', threadId:'th_4', text:'...', targets:[...], framing:'...', supersedes:[...] }\n" +
     "  { op:'resolve_thread', threadId:'th_4', resolution:'...', status:'resolved' }  — status resolved (default) or superseded. Resolution is a STATUS CHANGE, never a deletion: resolved threads stay, rendered below the open ones, and the resolution text is the audit trail.\n" +
+    "  { op:'reopen_thread', threadId:'th_4' }  — a resolved or superseded thread returns to open; the prior resolution moves onto the thread's history[], never erased\n" +
     "SPINE — the most valuable thing in the project; principles and thesis are read at the start of every session:\n" +
     "  { op:'update_spine', title:'...', thesis:'...', principles:['...','...'] }  — replaces the fields you pass\n" +
     "  { op:'add_decision', what:'...', why:'...' }  — the decisions log is APPEND-ONLY; what was cut and why, stamped by the server\n" +
@@ -1622,9 +1643,10 @@ function buildServer() {
     "CONCURRENCY: pass expectedLastUpdated (from your read). If the document has moved since, the write is REFUSED — re-read and re-apply. Unlike the board's patch, nothing is applied on a stale read: these are structural edits to a document, worth stopping.",
     {
       ops: z.string().describe("JSON array of operation objects, applied in order (see tool description for shapes)"),
+      dryRun: z.boolean().optional().describe("Validate the batch and report exactly what would change; nothing is written and lastUpdated is untouched"),
       expectedLastUpdated: z.string().optional().describe("The meta.lastUpdated you read; the write is refused if the document has moved past it")
     },
-    async ({ ops, expectedLastUpdated }) => {
+    async ({ ops, dryRun, expectedLastUpdated }) => {
       let operations;
       try { operations = JSON.parse(ops); }
       catch (e) { return { content: [{ type: "text", text: "ERROR: invalid ops JSON — " + e.message }] }; }
@@ -1787,6 +1809,9 @@ function buildServer() {
               const targets = Array.isArray(o.targets) ? o.targets.map(String) : [];
               const missing = targets.filter(id => !rvFindSection(doc, id));
               if (missing.length) { errors.push("op " + i + ": unknown target section(s) " + missing.join(",")); break; }
+              const supersedes = Array.isArray(o.supersedes) ? o.supersedes.map(String) : [];
+              const missingSup = supersedes.filter(id => !rvFindThread(doc, id));
+              if (missingSup.length) { errors.push("op " + i + ": unknown superseded thread(s) " + missingSup.join(",")); break; }
               const t = {
                 id: rvNextId(doc, "thread", "th", [doc.threads]),
                 text: String(o.text),
@@ -1796,8 +1821,10 @@ function buildServer() {
                 visibility: RV_VIS.includes(o.visibility) ? o.visibility : "include"
               };
               if (o.framing) t.framing = String(o.framing);
+              if (supersedes.length) t.supersedes = supersedes;
               doc.threads.push(t);
-              applied.push("thread+ " + t.id + (targets.length ? "" : " (document-wide)"));
+              applied.push("thread+ " + t.id + (targets.length ? "" : " (document-wide)") +
+                (supersedes.length ? " supersedes " + supersedes.join(",") : ""));
               break;
             }
 
@@ -1812,6 +1839,12 @@ function buildServer() {
                 t.targets = targets;
               }
               if (o.framing !== undefined) { if (o.framing) t.framing = String(o.framing); else delete t.framing; }
+              if (Array.isArray(o.supersedes)) {
+                const supersedes = o.supersedes.map(String);
+                const missingSup = supersedes.filter(id => !rvFindThread(doc, id));
+                if (missingSup.length) { errors.push("op " + i + ": unknown superseded thread(s) " + missingSup.join(",")); break; }
+                if (supersedes.length) t.supersedes = supersedes; else delete t.supersedes;
+              }
               applied.push("thread~ " + t.id);
               break;
             }
@@ -1825,6 +1858,21 @@ function buildServer() {
               t.resolution = String(o.resolution);
               t.resolvedTs = now;
               applied.push("thread " + t.id + "=" + t.status);
+              break;
+            }
+
+            case "reopen_thread": {
+              // The reverse gate. The old resolution is the audit trail, so it
+              // moves onto the thread's history rather than being erased.
+              const t = rvFindThread(doc, o.threadId);
+              if (!t) { errors.push("op " + i + ": thread " + o.threadId + " not found"); break; }
+              if (!t.status || t.status === "open") { errors.push("op " + i + ": thread " + t.id + " is already open"); break; }
+              t.history = asArray(t.history);
+              t.history.push({ status: t.status, resolution: t.resolution || "", resolvedTs: t.resolvedTs || null, reopened: now });
+              t.status = "open";
+              delete t.resolution;
+              delete t.resolvedTs;
+              applied.push("thread " + t.id + " reopened (resolution kept on history)");
               break;
             }
 
@@ -1871,8 +1919,19 @@ function buildServer() {
         }
       });
 
+      // v122: the batch is atomic — every op must have applied cleanly, or
+      // nothing is written. A document half-way through a structural edit is
+      // worse than one that refused it.
+      if (errors.length)
+        return { content: [{ type: "text", text:
+          "ERROR: refused — nothing written. A batch applies as a whole or not at all. " + errors.join("; ") +
+          (applied.length ? " | Valid op(s) in the same batch, also not applied: " + applied.join(", ") : "") }] };
       if (!applied.length)
-        return { content: [{ type: "text", text: "ERROR: no operations applied. " + errors.join("; ") }] };
+        return { content: [{ type: "text", text: "ERROR: no operations applied." }] };
+
+      if (dryRun)
+        return { content: [{ type: "text", text:
+          "DRY RUN: nothing written, nothing stamped. The batch is valid and would apply: " + applied.join(", ") + "." }] };
 
       await remember(ROPS, archiveKey(), {
         ts: now,
@@ -1896,13 +1955,41 @@ function buildServer() {
 
   server.tool(
     "export_review",
-    "Render the document to markdown and FREEZE it: sections in position order, numbers computed from current positions, {{ref:...}} and {{fact:...}} resolved, private material and drafting notes and threads omitted. The rendered markdown, the date and the numbering as it stood are stored under /reviewStoreExports (newest " + EXPORTS_KEEP + " kept), and a full snapshot of the document is archived — because once a copy has gone to a reader, 'Section 7' means something to a human holding it, and a later insert must renumber the live document without silently invalidating theirs. Returns the markdown. Optional label names the version (e.g. 'CEO draft 1').",
-    { label: z.string().optional().describe("Short name for this version, stored with the export record") },
-    async ({ label }) => {
+    "Render the document to markdown and FREEZE it: sections in position order, numbers computed from current positions, {{ref:...}} and {{fact:...}} resolved, private material and drafting notes and threads omitted. The rendered markdown, the date and the numbering as it stood are stored under /reviewStoreExports (newest " + EXPORTS_KEEP + " kept), and a full snapshot of the document is archived — because once a copy has gone to a reader, 'Section 7' means something to a human holding it, and a later insert must renumber the live document without silently invalidating theirs. Returns the markdown. Optional label names the version (e.g. 'CEO draft 1'). Pass preview:true for a MANIFEST of what would be included versus withheld, listed by id — every private section, subsection and thread that would be stripped is named — with no version frozen and nothing stored.",
+    {
+      label: z.string().optional().describe("Short name for this version, stored with the export record"),
+      preview: z.boolean().optional().describe("Return an included/withheld manifest by id; nothing is frozen or stored")
+    },
+    async ({ label, preview }) => {
       const snap = await db.ref(RNODE).get();
       if (!snap.exists()) return { content: [{ type: "text", text: "ERROR: the review document is empty — nothing to export." }] };
       const doc = snap.val();
       const numbering = rvNumbering(doc);
+
+      if (preview) {
+        // What the export WOULD do, by id — nothing frozen, nothing stored.
+        const row = x => ({ id: x.id, number: numbering[x.id] || null, title: x.title || "" });
+        const included = { parts: [], sections: [], subsections: [] };
+        const withheld = { sections: [], subsections: [], threads: [] };
+        rvByPos(doc.parts).forEach(p => included.parts.push(row(p)));
+        rvByPos(doc.parts).forEach(part =>
+          rvByPos(rvSectionsOf(doc, part.id)).forEach(sec => {
+            (sec.visibility === "private" ? withheld.sections : included.sections).push(row(sec));
+            rvByPos(asArray(sec.subsections)).forEach(sub => {
+              // A subsection inside a private section never exports either way.
+              if (sec.visibility === "private" || sub.visibility === "private")
+                withheld.subsections.push(row(sub));
+              else included.subsections.push(row(sub));
+            });
+          }));
+        asArray(doc.threads).forEach(t => {
+          if (t.visibility === "private") withheld.threads.push({ id: t.id, text: t.text });
+        });
+        return { content: [{ type: "text", text:
+          "PREVIEW: nothing frozen, nothing stored. Threads (all of them) and drafting notes never enter an export; the threads listed under withheld are the private ones.\n" +
+          JSON.stringify({ included, withheld }, null, 2) }] };
+      }
+
       const markdown = rvExportMarkdown(doc, numbering);
       const now = new Date().toISOString();
       const record = {
@@ -1948,4 +2035,4 @@ app.get(PATH, (_req, res) => res.status(405).send("POST only"));
 app.get("/", (_req, res) => res.send("walk-reference MCP: ok"));
 
 const port = process.env.PORT || 8080;
-app.listen(port, () => console.log("postitpa board server v121 listening on " + port));
+app.listen(port, () => console.log("postitpa board server v122 listening on " + port));
